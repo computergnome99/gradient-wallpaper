@@ -51,7 +51,7 @@ gradient-wallpaper create --colors "#173b70" "#7165c8" "#f28a9b" "#ffb36b" \
 `create` is the default command, so the existing form without the word
 `create` remains supported.
 
-The default image is `2560x1080`; both dimensions can be set independently:
+The default image is `1920x1080`; both dimensions can be set independently:
 
 ```sh
 gradient-wallpaper --width 3840 --height 2160 \
@@ -100,24 +100,37 @@ file format are not stored in the seed. Legacy text/numeric seeds are still
 accepted as procedural entropy, randomize omitted visual settings from that
 entropy, and are returned as self-contained seeds. Self-contained seeds have
 no textual prefix; the CLI distinguishes them from entropy-only text seeds by
-their encoded payload.
+their encoded payload. Version-3 and version-4 self-contained seeds remain
+readable. Version 3 receives neutral rotation, zoom, and offset settings; both
+versions default the new opacity setting to full.
 
 Without a self-contained seed, omitted visual settings are randomized and
-baked into the printed seed. Random wave amplitude and frequency are biased
-toward gentler, lower values. If colors are omitted, a random 3–6 color HSL palette is created;
-wave mode, orientation, end treatment, vertical foreground side, and glue-layer
-settings are chosen from the seed, along with randomized halftone and grain
-strengths. Width and height remain `2560x1080` unless specified.
+baked into the printed seed. Random wave amplitude and frequency avoid near-flat
+values: amplitude ranges from 0.06 to 0.18 and frequency from 1.5 to 4, both
+biased toward their upper ends. Random cloud spread stays between 0.12 and 0.5
+to avoid isolated small color spots. If colors are omitted, a random 3–6 color
+HSL palette is created;
+wave mode, orientation, end treatment, vertical foreground side, wave rotation,
+zoom/offset, and glue-layer settings are chosen from the seed, along with
+randomized halftone and grain strengths. Width and height remain `1920x1080`
+unless specified. Random wave opacity stays between 0.92 and 1 and is biased
+very heavily toward full opacity. Random rotation stays within ±15 degrees;
+random zoom stays between 0 and 0.12 and is biased close to 0 (no zoom).
 Optional controls:
 
 ```text
 --wave-amplitude 0.22  Base wave amplitude (varied by seed), from 0 to 0.5
 --wave-frequency 1    Base path detail (varied by seed), from 0 to 20
 --wave-depth 0.75     Wave lighting and chromatic effect strength, from 0 to 1
+--wave-opacity 1      Wave visibility, from 0 (off) to 1 (full)
 --wave-mode auto      auto, shadow, underglow, or chromatic-aberration
 --wave-ends auto      auto, fade, or edge-to-edge
 --wave-orientation auto  auto, horizontal, or vertical
 --wave-side auto      auto, left, or right foreground side for vertical waves
+--wave-rotation 8     Wave tilt in degrees, from -15 to 15
+--zoom 0              Overscale then crop, from 0 (off) to 1 (2x)
+--offset-x 0          Horizontal offset in the overscan area, -1 to 1
+--offset-y 0          Vertical offset in the overscan area, -1 to 1
 --angle 20            Background point-cloud gradient direction
 --dither 0.5          Dithering strength, from 0 (off) to 1
 --cloud-spread 0.18   Gaussian point size/spread, from 0.03 to 0.5
@@ -146,6 +159,15 @@ of left to right. Underglow is centered on the wave edge and follows its end
 fade. Vertical waves choose a seeded left/right foreground side; set
 `--wave-side left` or `--wave-side right` to force one (which also selects
 vertical orientation when `--wave-orientation` is `auto`).
+`--wave-opacity 0` disables the wave layer and all wave lighting/effects;
+intermediate values fade the whole wave treatment. If omitted, opacity is
+randomized very slightly and stays close to full visibility.
+`--wave-rotation` tilts the wave and its lighting together, for either
+orientation. `--zoom` ranges from `0` (no zoom) to `1` (2x zoom). It renders a
+larger canvas and crops it back to the requested dimensions without scaling the
+result down. The offset controls choose where the requested-size window sits
+within the overscan: `0` centers it, while `-1` and `1` select the left/right
+or top/bottom limit. Offsets have no visual effect when zoom is `0`.
 The glue layer uses large, low-opacity Gaussian points to soften the boundary
 between the two gradients without replacing either one. It is skipped for
 palettes with fewer than three unique colors. Use `--glue-points 0` to disable

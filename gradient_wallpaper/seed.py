@@ -5,7 +5,8 @@ import binascii
 import json
 from typing import TypedDict, cast
 
-_SEED_VERSION = 3
+_SEED_VERSION = 6
+_PREVIOUS_SEED_VERSIONS = {3, 4, 5}
 
 
 class SeedSettings(TypedDict):
@@ -16,10 +17,15 @@ class SeedSettings(TypedDict):
     wave_amplitude: float
     wave_frequency: float
     wave_depth: float
+    wave_opacity: float
     wave_mode: str
     wave_ends: str
     wave_orientation: str
     wave_side: str
+    wave_rotation: float
+    zoom: float
+    offset_x: float
+    offset_y: float
     angle: float
     dither: float
     cloud_spread: float
@@ -32,6 +38,17 @@ class SeedSettings(TypedDict):
 
 
 _SETTING_KEYS = frozenset(SeedSettings.__annotations__)
+_LEGACY_CROP_SETTING_KEYS = (
+    _SETTING_KEYS - {"offset_x", "offset_y"}
+) | {"crop_x", "crop_y"}
+_VERSION_5_SETTING_KEYS = _LEGACY_CROP_SETTING_KEYS
+_VERSION_4_SETTING_KEYS = _VERSION_5_SETTING_KEYS - {"wave_opacity"}
+_VERSION_3_SETTING_KEYS = _VERSION_4_SETTING_KEYS - {
+    "wave_rotation",
+    "zoom",
+    "crop_x",
+    "crop_y",
+}
 
 
 def encode_seed(entropy: str, settings: SeedSettings) -> str:
@@ -55,19 +72,60 @@ def decode_seed(value: str) -> tuple[str, SeedSettings] | None:
     except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError):
         return None
 
+    if not isinstance(payload, dict):
+        return None
+    version = payload.get("version")
     if (
-        not isinstance(payload, dict)
-        or payload.get("version") != _SEED_VERSION
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or (
+            version != _SEED_VERSION
+            and version not in _PREVIOUS_SEED_VERSIONS
+        )
     ):
         return None
+    expected_keys = {
+        3: _VERSION_3_SETTING_KEYS,
+        4: _VERSION_4_SETTING_KEYS,
+        5: _VERSION_5_SETTING_KEYS,
+        _SEED_VERSION: _SETTING_KEYS,
+    }[version]
     if (
         not isinstance(payload.get("entropy"), str)
         or not isinstance(payload.get("settings"), dict)
-        or frozenset(payload["settings"]) != _SETTING_KEYS
+        or frozenset(payload["settings"]) != expected_keys
     ):
         raise ValueError("unsupported or incomplete self-contained seed")
 
     settings = payload["settings"]
+    if version == 3:
+        settings = {
+            **settings,
+            "wave_rotation": 0.0,
+            "zoom": 0.0,
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+        }
+    elif version in {4, 5}:
+        old_zoom = settings["zoom"]
+        normalized_zoom = (
+            old_zoom - 1
+            if isinstance(old_zoom, (int, float))
+            and not isinstance(old_zoom, bool)
+            else old_zoom
+        )
+        settings = {
+            **{
+                key: value
+                for key, value in settings.items()
+                if key not in {"crop_x", "crop_y"}
+            },
+            "zoom": normalized_zoom,
+            "offset_x": settings["crop_x"],
+            "offset_y": settings["crop_y"],
+        }
+    if version in {3, 4}:
+        settings = {**settings, "wave_opacity": 1.0}
     if (
         not isinstance(settings["width"], int)
         or isinstance(settings["width"], bool)
@@ -91,7 +149,12 @@ def decode_seed(value: str) -> tuple[str, SeedSettings] | None:
             for key in (
                 "wave_amplitude",
                 "wave_frequency",
+                "wave_rotation",
+                "zoom",
+                "offset_x",
+                "offset_y",
                 "wave_depth",
+                "wave_opacity",
                 "angle",
                 "dither",
                 "cloud_spread",

@@ -12,17 +12,22 @@ from .seed import SeedSettings, decode_seed, encode_seed
 
 DEFAULT_COLORS = ["#173B70", "#7165C8", "#F28A9B", "#FFB36B"]
 DEFAULT_SETTINGS: SeedSettings = {
-    "width": 2560,
+    "width": 1920,
     "height": 1080,
     "colors": DEFAULT_COLORS,
     "color_order": "input",
     "wave_amplitude": 0.22,
     "wave_frequency": 1.0,
     "wave_depth": 0.75,
+    "wave_opacity": 1.0,
     "wave_mode": "auto",
     "wave_ends": "auto",
     "wave_orientation": "auto",
     "wave_side": "auto",
+    "wave_rotation": 0.0,
+    "zoom": 0.0,
+    "offset_x": 0.0,
+    "offset_y": 0.0,
     "angle": 20.0,
     "dither": 0.5,
     "cloud_spread": 0.18,
@@ -103,9 +108,9 @@ def _randomize_missing_settings(
     if args.color_order is None:
         settings["color_order"] = rng.choice(("input", "hue"))
     if args.wave_amplitude is None:
-        settings["wave_amplitude"] = 0.22 * rng.random() ** 2
+        settings["wave_amplitude"] = 0.06 + 0.12 * rng.random() ** 0.75
     if args.wave_frequency is None:
-        settings["wave_frequency"] = 4.0 * rng.random() ** 3
+        settings["wave_frequency"] = 1.5 + 2.5 * rng.random() ** 0.75
     if args.wave_depth is None:
         settings["wave_depth"] = rng.uniform(0, 1)
     if args.angle is None:
@@ -113,7 +118,7 @@ def _randomize_missing_settings(
     if args.dither is None:
         settings["dither"] = rng.uniform(0, 1)
     if args.cloud_spread is None:
-        settings["cloud_spread"] = rng.uniform(0.03, 0.5)
+        settings["cloud_spread"] = 0.12 + 0.38 * rng.random() ** 0.75
     if args.glue_points is None:
         settings["glue_points"] = rng.randint(2, 3)
     if args.glue_colors is None:
@@ -126,6 +131,16 @@ def _randomize_missing_settings(
         settings["halftone_strength"] = 0.45 * rng.random() ** 2
     if args.grain_strength is None:
         settings["grain_strength"] = 0.25 * rng.random() ** 2
+    if args.wave_rotation is None:
+        settings["wave_rotation"] = rng.uniform(-15, 15)
+    if args.wave_opacity is None:
+        settings["wave_opacity"] = 0.92 + 0.08 * rng.random() ** 0.25
+    if args.zoom is None:
+        settings["zoom"] = 0.12 * rng.random() ** 3
+    if args.offset_x is None:
+        settings["offset_x"] = rng.uniform(-0.35, 0.35)
+    if args.offset_y is None:
+        settings["offset_y"] = rng.uniform(-0.35, 0.35)
 
 
 def positive_integer(value: str) -> int:
@@ -175,107 +190,138 @@ def _add_create_arguments(parser: argparse.ArgumentParser) -> None:
         "and the CLI prints an updated seed. Output path and file format are "
         "not stored in the seed. Randomization note: without a self-contained "
         "seed, omitted visual settings and colors are randomized from the seed; "
-        "dimensions stay 2560x1080 unless specified. The generated seed stores "
+        "dimensions stay 1920x1080 unless specified. The generated seed stores "
         "those choices for replay. Legacy text/numeric seeds remain supported."
     )
-    parser.add_argument(
+    output_group = parser.add_argument_group("Output image")
+    output_group.add_argument(
         "-o", "--output", type=Path, default=Path("wallpaper.png"),
         help="output image path (default: wallpaper.png)",
     )
-    parser.add_argument(
+    output_group.add_argument(
         "--width", type=positive_integer,
-        help="image width in pixels (default: 2560)",
+        help="image width in pixels (default: 1920)",
     )
-    parser.add_argument(
+    output_group.add_argument(
         "--height", type=positive_integer,
         help="image height in pixels (default: 1080)",
     )
-    parser.add_argument(
+    output_group.add_argument(
+        "--format", choices=("png", "jpeg", "webp"),
+        help="output format (otherwise inferred from the file extension)",
+    )
+
+    palette_group = parser.add_argument_group("Palette and seed")
+    palette_group.add_argument(
         "--colors", nargs="+", metavar="HEX",
         help="gradient stops in #RGB or #RRGGBB notation",
     )
-    parser.add_argument(
+    palette_group.add_argument(
         "--color-order", choices=("input", "hue"),
         help="preserve input order or sort by the shortest HSV hue arc",
     )
-    parser.add_argument(
+    palette_group.add_argument(
         "--seed",
         help=(
             "self-contained seed or entropy-only text; settings can override "
             "stored values in a self-contained seed"
         ),
     )
-    parser.add_argument(
+
+    wave_group = parser.add_argument_group("Wave")
+    wave_group.add_argument(
         "--wave-amplitude", type=bounded_float(0, 0.5),
         help="base wave amplitude, from 0 to 0.5",
     )
-    parser.add_argument(
+    wave_group.add_argument(
         "--wave-frequency", type=bounded_float(0, 20),
         help="base path detail, from 0 to 20",
     )
-    parser.add_argument(
+    wave_group.add_argument(
         "--wave-depth", type=bounded_float(0, 1),
         help="wave effect strength from 0 to 1",
     )
-    parser.add_argument(
+    wave_group.add_argument(
+        "--wave-opacity", type=bounded_float(0, 1),
+        help="wave visibility from 0 (off) to 1 (full)",
+    )
+    wave_group.add_argument(
         "--wave-mode",
         choices=("auto", "shadow", "underglow", "chromatic-aberration"),
         help="wave treatment, or automatic selection",
     )
-    parser.add_argument(
+    wave_group.add_argument(
         "--wave-ends",
         choices=("auto", "fade", "edge-to-edge"),
         help="fade wave ends or continue to image edges",
     )
-    parser.add_argument(
+    wave_group.add_argument(
         "--wave-orientation",
         choices=("auto", "horizontal", "vertical"),
         help="wave direction",
     )
-    parser.add_argument(
+    wave_group.add_argument(
         "--wave-side",
         choices=("auto", "left", "right"),
         help="vertical foreground side",
     )
-    parser.add_argument(
+    wave_group.add_argument(
+        "--wave-rotation", type=bounded_float(-15, 15),
+        help="tilt the wave by -15 to 15 degrees",
+    )
+
+    framing_group = parser.add_argument_group("Framing")
+    framing_group.add_argument(
+        "--zoom", type=bounded_float(0, 1),
+        help="overscale then crop the canvas, from 0 (off) to 1 (2x)",
+    )
+    framing_group.add_argument(
+        "--offset-x", type=bounded_float(-1, 1),
+        help="horizontal offset in the overscan area (-1 left, 1 right)",
+    )
+    framing_group.add_argument(
+        "--offset-y", type=bounded_float(-1, 1),
+        help="vertical offset in the overscan area (-1 top, 1 bottom)",
+    )
+
+    gradient_group = parser.add_argument_group("Gradient and blending")
+    gradient_group.add_argument(
         "--angle", type=bounded_float(-360, 360),
         help="gradient direction in degrees, from -360 to 360",
     )
-    parser.add_argument(
-        "--dither", type=bounded_float(0, 1),
-        help="dither strength from 0 (off) to 1",
-    )
-    parser.add_argument(
+    gradient_group.add_argument(
         "--cloud-spread", type=bounded_float(0.03, 0.5),
         help="Gaussian point size/spread, from 0.03 to 0.5",
     )
-    parser.add_argument(
+    gradient_group.add_argument(
         "--glue-points", type=non_negative_integer,
         help="number of faint blending points, from 0 to 8",
     )
-    parser.add_argument(
+    gradient_group.add_argument(
         "--glue-colors", type=int, choices=(1, 2),
         help="number of palette colors used by the blending layer, 1 or 2",
     )
-    parser.add_argument(
+    gradient_group.add_argument(
         "--glue-strength", type=bounded_float(0, 0.25),
         help="blending-layer opacity from 0 to 0.25",
     )
-    parser.add_argument(
+    gradient_group.add_argument(
         "--glue-spread", type=bounded_float(0.1, 0.8),
         help="blending-point size as a fraction of image dimensions",
     )
-    parser.add_argument(
+
+    effects_group = parser.add_argument_group("Post-effects")
+    effects_group.add_argument(
+        "--dither", type=bounded_float(0, 1),
+        help="dither strength from 0 (off) to 1",
+    )
+    effects_group.add_argument(
         "--halftone-strength", type=bounded_float(0, 1),
         help="ordered dot-dithering strength from 0 (off) to 1 (strong)",
     )
-    parser.add_argument(
+    effects_group.add_argument(
         "--grain-strength", type=bounded_float(0, 1),
         help="filmic grain strength from 0 (off) to 1 (strong)",
-    )
-    parser.add_argument(
-        "--format", choices=("png", "jpeg", "webp"),
-        help="output format (otherwise inferred from the file extension)",
     )
 
 
@@ -324,10 +370,15 @@ EVAL_SETTINGS = (
     ("Wave amplitude", "wave_amplitude"),
     ("Wave frequency", "wave_frequency"),
     ("Wave depth", "wave_depth"),
+    ("Wave opacity", "wave_opacity"),
     ("Wave mode", "wave_mode"),
     ("Wave ends", "wave_ends"),
     ("Wave orientation", "wave_orientation"),
     ("Wave side", "wave_side"),
+    ("Wave rotation", "wave_rotation"),
+    ("Zoom", "zoom"),
+    ("Offset X", "offset_x"),
+    ("Offset Y", "offset_y"),
     ("Gradient angle", "angle"),
     ("Fine dither", "dither"),
     ("Cloud spread", "cloud_spread"),
@@ -438,10 +489,15 @@ def _create(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
         ("wave_amplitude", "wave_amplitude"),
         ("wave_frequency", "wave_frequency"),
         ("wave_depth", "wave_depth"),
+        ("wave_opacity", "wave_opacity"),
         ("wave_mode", "wave_mode"),
         ("wave_ends", "wave_ends"),
         ("wave_orientation", "wave_orientation"),
         ("wave_side", "wave_side"),
+        ("wave_rotation", "wave_rotation"),
+        ("zoom", "zoom"),
+        ("offset_x", "offset_x"),
+        ("offset_y", "offset_y"),
         ("angle", "angle"),
         ("dither", "dither"),
         ("cloud_spread", "cloud_spread"),
@@ -465,8 +521,21 @@ def _create(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
         settings["wave_frequency"] = bounded_float(0, 20)(
             str(settings["wave_frequency"])
         )
+        settings["wave_rotation"] = bounded_float(-15, 15)(
+            str(settings["wave_rotation"])
+        )
+        settings["zoom"] = bounded_float(0, 1)(str(settings["zoom"]))
+        settings["offset_x"] = bounded_float(-1, 1)(
+            str(settings["offset_x"])
+        )
+        settings["offset_y"] = bounded_float(-1, 1)(
+            str(settings["offset_y"])
+        )
         settings["wave_depth"] = bounded_float(0, 1)(
             str(settings["wave_depth"])
+        )
+        settings["wave_opacity"] = bounded_float(0, 1)(
+            str(settings["wave_opacity"])
         )
         settings["angle"] = bounded_float(-360, 360)(str(settings["angle"]))
         settings["dither"] = bounded_float(0, 1)(str(settings["dither"]))
@@ -520,6 +589,7 @@ def _create(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
             seed=entropy,
             wave_amplitude=settings["wave_amplitude"],
             wave_frequency=settings["wave_frequency"],
+            wave_opacity=settings["wave_opacity"],
             angle=settings["angle"],
             dither=settings["dither"],
             cloud_spread=settings["cloud_spread"],
@@ -528,6 +598,10 @@ def _create(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
             wave_ends=settings["wave_ends"],
             wave_orientation=settings["wave_orientation"],
             wave_side=settings["wave_side"],
+            wave_rotation=settings["wave_rotation"],
+            zoom=settings["zoom"],
+            offset_x=settings["offset_x"],
+            offset_y=settings["offset_y"],
             glue_points=settings["glue_points"],
             glue_colors=settings["glue_colors"],
             glue_strength=settings["glue_strength"],

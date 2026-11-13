@@ -13,11 +13,14 @@ def _wavy_path(
     baseline: float,
     jitter: float,
     frequency: float,
+    tilt_slope: float = 0.0,
 ) -> np.ndarray:
     point_count = max(4, min(20, round(4 + frequency)))
-    points = np.clip(
-        baseline + rng.normal(0, jitter, size=point_count), 0.04, 0.96
-    ).astype(np.float32)
+    points = baseline + rng.normal(0, jitter, size=point_count)
+    if tilt_slope:
+        point_positions = np.linspace(0, 1, point_count, dtype=np.float32)
+        points += tilt_slope * (point_positions - 0.5)
+    points = np.clip(points, 0.04, 0.96).astype(np.float32)
     scaled_x = x * (point_count - 1)
     segment = np.minimum(scaled_x.astype(np.intp), point_count - 2)
     amount = scaled_x - segment
@@ -42,6 +45,7 @@ def _create_wave_layers(
     orientation: str = "horizontal",
     wave_ends: str = "fade",
     foreground_side: str = "bottom",
+    wave_rotation: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Create a wave mask, a crest highlight, and an inner edge shadow."""
     if orientation == "vertical":
@@ -54,6 +58,7 @@ def _create_wave_layers(
             orientation="horizontal",
             wave_ends=wave_ends,
             foreground_side=foreground_side,
+            wave_rotation=wave_rotation,
         )
         return tuple(layer.T for layer in layers)
     if orientation != "horizontal":
@@ -77,6 +82,7 @@ def _create_wave_layers(
         baseline,
         effective_amplitude * rng.uniform(0.7, 1.1),
         float(effective_frequency),
+        float(np.tan(np.deg2rad(wave_rotation)) * width / height),
     )
     light_side = int(rng.choice((-1, 1)))
     signed_distance = (y - path) * height
@@ -617,6 +623,11 @@ def render(
     glue_spread: float = 0.35,
     halftone_strength: float = 0.25,
     grain_strength: float = 0.1,
+    wave_rotation: float = 0.0,
+    zoom: float = 0.0,
+    offset_x: float = 0.0,
+    offset_y: float = 0.0,
+    wave_opacity: float = 1.0,
 ) -> Image.Image:
     """Render a wave-shaped point-cloud gradient with seeded dithering."""
     if width < 1 or height < 1:
@@ -625,12 +636,22 @@ def render(
         raise ValueError("at least one color is required")
     if not 0 <= wave_amplitude <= 0.5:
         raise ValueError("wave amplitude must be between 0 and 0.5")
+    if not -15 <= wave_rotation <= 15:
+        raise ValueError("wave rotation must be between -15 and 15 degrees")
+    if not 0 <= zoom <= 1:
+        raise ValueError("zoom must be between 0 and 1")
+    if not -1 <= offset_x <= 1:
+        raise ValueError("offset x must be between -1 and 1")
+    if not -1 <= offset_y <= 1:
+        raise ValueError("offset y must be between -1 and 1")
     if not 0 <= dither <= 1:
         raise ValueError("dither must be between 0 and 1")
     if not 0.03 <= cloud_spread <= 0.5:
         raise ValueError("cloud spread must be between 0.03 and 0.5")
     if not 0 <= wave_depth <= 1:
         raise ValueError("wave depth must be between 0 and 1")
+    if not 0 <= wave_opacity <= 1:
+        raise ValueError("wave opacity must be between 0 and 1")
     if not 0 <= glue_points <= 8:
         raise ValueError("glue point count must be between 0 and 8")
     if glue_colors not in {1, 2}:
@@ -645,6 +666,10 @@ def render(
         raise ValueError("grain strength must be between 0 and 1")
     if seed is None:
         seed = secrets.token_hex(8)
+    output_width, output_height = width, height
+    overscale = 1 + zoom
+    canvas_width = max(width, int(np.ceil(width * overscale)))
+    canvas_height = max(height, int(np.ceil(height * overscale)))
     seed_value = int.from_bytes(seed.encode("utf-8"), "little", signed=False)
     rng = np.random.default_rng(seed_value)
     glue_rng = np.random.default_rng(seed_value ^ 0xA24BAED4963EE407)
@@ -663,8 +688,8 @@ def render(
         wave_side,
     )
     mask, highlight, shadow = _create_wave_layers(
-        width,
-        height,
+        canvas_width,
+        canvas_height,
         rng,
         wave_amplitude,
         wave_frequency,
@@ -674,52 +699,63 @@ def render(
             "top" if selected_orientation == "vertical" and selected_side == "left"
             else "bottom"
         ),
+        wave_rotation=wave_rotation,
     )
     underglow = _create_wave_underglow_mask(mask, selected_orientation)
     aberration_colors = None
-    if mode != "underglow" and accent_color is not None:
+    if (
+        (mode != "underglow" or wave_opacity == 0)
+        and accent_color is not None
+    ):
         gradient_colors = np.concatenate(
             (gradient_colors, accent_color[None, :]), axis=0
         )
-    if mode == "chromatic-aberration":
+    if mode == "chromatic-aberration" and wave_opacity > 0:
         gradient_colors, aberration_colors = _extract_chromatic_colors(
             gradient_colors
         )
 
     background_gradient = _create_point_cloud(
-        width, height, gradient_colors, rng, cloud_spread, angle
+        canvas_width, canvas_height, gradient_colors, rng, cloud_spread, angle
     )
     background = primary_linear + (background_gradient - primary_linear) * 0.7
     wave = _create_point_cloud(
-        width,
-        height,
+        canvas_width,
+        canvas_height,
         gradient_colors,
         rng,
         cloud_spread,
         angle + rng.uniform(55, 125),
     )
-    if mode == "shadow":
+    effective_wave_depth = wave_depth * wave_opacity
+    if mode == "shadow" and wave_opacity > 0:
         background = _apply_wave_shadow(
-            background, shadow, wave_depth, _darkest_palette_color(palette)
+            background,
+            shadow,
+            effective_wave_depth,
+            _darkest_palette_color(palette),
         )
-    elif mode == "underglow":
+    elif mode == "underglow" and wave_opacity > 0:
         background = _apply_wave_underglow(
             background,
             underglow,
-            wave_depth,
+            effective_wave_depth,
             _srgb_to_linear(accent_color[None, :])[0],
         )
-    image = _screen_blend(background, wave, mask)
-    if mode == "chromatic-aberration":
+    image = _screen_blend(background, wave, mask * wave_opacity)
+    if mode == "chromatic-aberration" and wave_opacity > 0:
         if aberration_colors is None:
             raise RuntimeError("chromatic aberration mode has no edge colors")
         image = _apply_chromatic_aberration(
-            image, mask, aberration_colors, wave_depth, rng
+            image, mask, aberration_colors, effective_wave_depth, rng
         )
-    elif mode in {"shadow", "underglow"}:
+    elif mode in {"shadow", "underglow"} and wave_opacity > 0:
         highlight_intensity = 0.5 if mode == "underglow" else 1.0
         image = _apply_wave_highlight(
-            image, highlight, wave_depth, intensity=highlight_intensity
+            image,
+            highlight,
+            effective_wave_depth,
+            intensity=highlight_intensity,
         )
     image = _apply_glue_layer(
         image,
@@ -737,8 +773,15 @@ def render(
     )
 
     if dither:
-        srgb += rng.normal(0, dither * 1.25 / 255, size=(height, width, 1))
+        srgb += rng.normal(
+            0, dither * 1.25 / 255, size=(canvas_height, canvas_width, 1)
+        )
     srgb = _apply_halftone_dither(srgb, halftone_strength, halftone_rng)
     srgb = _apply_film_grain(srgb, grain_strength, grain_rng)
     pixels = np.clip(srgb * 255, 0, 255).astype(np.uint8)
-    return Image.fromarray(pixels)
+    image = Image.fromarray(pixels)
+    left = round((canvas_width - output_width) * (offset_x + 1) / 2)
+    top = round((canvas_height - output_height) * (offset_y + 1) / 2)
+    return image.crop(
+        (left, top, left + output_width, top + output_height)
+    )

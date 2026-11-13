@@ -26,7 +26,26 @@ from gradient_wallpaper.render import (
 
 
 class RenderTests(unittest.TestCase):
-    def test_random_wave_shape_settings_are_biased_toward_gentler_values(self):
+    def test_create_help_groups_settings_by_purpose(self):
+        from gradient_wallpaper.cli import build_create_parser
+
+        help_text = build_create_parser().format_help()
+
+        for heading in (
+            "Output image:",
+            "Palette and seed:",
+            "Wave:",
+            "Framing:",
+            "Gradient and blending:",
+            "Post-effects:",
+        ):
+            self.assertIn(heading, help_text)
+        self.assertIn("--offset-x", help_text)
+        self.assertIn("--offset-y", help_text)
+        self.assertNotIn("--crop-x", help_text)
+        self.assertNotIn("--crop-y", help_text)
+
+    def test_random_settings_avoid_flat_waves_and_tiny_cloud_points(self):
         from gradient_wallpaper.cli import (
             _default_settings,
             _randomize_missing_settings,
@@ -36,16 +55,30 @@ class RenderTests(unittest.TestCase):
         args = build_create_parser().parse_args([])
         amplitudes = []
         frequencies = []
+        cloud_spreads = []
+        opacities = []
         for index in range(64):
             settings = _default_settings()
             _randomize_missing_settings(settings, f"wave-{index}", args)
             amplitudes.append(settings["wave_amplitude"])
             frequencies.append(settings["wave_frequency"])
+            cloud_spreads.append(settings["cloud_spread"])
+            opacities.append(settings["wave_opacity"])
 
-        self.assertLess(float(np.mean(amplitudes)), 0.09)
-        self.assertLess(float(np.mean(frequencies)), 1.3)
-        self.assertLessEqual(max(amplitudes), 0.22)
+        self.assertGreater(float(np.mean(amplitudes)), 0.10)
+        self.assertLess(float(np.mean(amplitudes)), 0.14)
+        self.assertGreater(float(np.mean(frequencies)), 2.5)
+        self.assertLess(float(np.mean(frequencies)), 3.2)
+        self.assertGreaterEqual(min(amplitudes), 0.06)
+        self.assertLessEqual(max(amplitudes), 0.18)
+        self.assertGreaterEqual(min(frequencies), 1.5)
         self.assertLessEqual(max(frequencies), 4.0)
+        self.assertGreaterEqual(min(cloud_spreads), 0.12)
+        self.assertGreater(float(np.mean(cloud_spreads)), 0.3)
+        self.assertLessEqual(max(cloud_spreads), 0.5)
+        self.assertGreaterEqual(min(opacities), 0.92)
+        self.assertGreater(float(np.mean(opacities)), 0.98)
+        self.assertLessEqual(max(opacities), 1.0)
 
     def test_parse_color_accepts_short_and_long_hex(self):
         self.assertEqual(parse_color("#abc"), (170, 187, 204))
@@ -67,6 +100,109 @@ class RenderTests(unittest.TestCase):
         first = np.asarray(render(**options))
         second = np.asarray(render(**options))
         np.testing.assert_array_equal(first, second)
+
+    def test_wave_rotation_tilts_horizontal_and_vertical_masks(self):
+        for orientation in ("horizontal", "vertical"):
+            with self.subTest(orientation=orientation):
+                options = dict(
+                    width=100,
+                    height=100,
+                    wave_amplitude=0,
+                    wave_frequency=0,
+                    orientation=orientation,
+                    wave_ends="edge-to-edge",
+                )
+                unrotated, _, _ = _create_wave_layers(
+                    **options, rng=np.random.default_rng(42)
+                )
+                rotated, highlight, _ = _create_wave_layers(
+                    **options,
+                    rng=np.random.default_rng(42),
+                    wave_rotation=15,
+                )
+                np.testing.assert_array_equal(
+                    rotated,
+                    _create_wave_layers(
+                        **options,
+                        rng=np.random.default_rng(42),
+                        wave_rotation=15,
+                    )[0],
+                )
+                self.assertFalse(np.array_equal(unrotated, rotated))
+
+                if orientation == "horizontal":
+                    left_edge = int(np.argmax(rotated[:, 20] > 0.5))
+                    right_edge = int(np.argmax(rotated[:, 80] > 0.5))
+                    left_highlight = int(np.argmax(highlight[:, 20]))
+                    right_highlight = int(np.argmax(highlight[:, 80]))
+                else:
+                    left_edge = int(np.argmax(rotated[20] > 0.5))
+                    right_edge = int(np.argmax(rotated[80] > 0.5))
+                    left_highlight = int(np.argmax(highlight[20]))
+                    right_highlight = int(np.argmax(highlight[80]))
+                self.assertGreater(right_edge, left_edge)
+                self.assertLessEqual(abs(left_highlight - left_edge), 4)
+                self.assertLessEqual(abs(right_highlight - right_edge), 4)
+
+    def test_zoom_overscans_and_crops_without_changing_output_size(self):
+        options = dict(
+            width=40,
+            height=24,
+            colors=[(20, 40, 80), (180, 90, 120), (240, 200, 80)],
+            seed="zoom-crop",
+        )
+        base = np.asarray(render(**options))
+        no_zoom = np.asarray(
+            render(**options, zoom=0, offset_x=-1, offset_y=1)
+        )
+        np.testing.assert_array_equal(base, no_zoom)
+
+        zoomed = render(**options, zoom=0.25, offset_x=0.8, offset_y=-0.6)
+        repeat = render(**options, zoom=0.25, offset_x=0.8, offset_y=-0.6)
+        self.assertEqual(zoomed.size, (40, 24))
+        np.testing.assert_array_equal(np.asarray(zoomed), np.asarray(repeat))
+        self.assertFalse(np.array_equal(base, np.asarray(zoomed)))
+
+        full_zoom = render(**options, zoom=1, offset_x=-1, offset_y=1)
+        self.assertEqual(full_zoom.size, (40, 24))
+        self.assertFalse(np.array_equal(base, np.asarray(full_zoom)))
+
+    def test_wave_opacity_zero_disables_wave_effects(self):
+        options = dict(
+            width=48,
+            height=28,
+            colors=[
+                (15, 20, 40),
+                (50, 100, 170),
+                (80, 180, 210),
+                (200, 70, 130),
+                (240, 190, 80),
+                (250, 245, 230),
+            ],
+            seed="wave-opacity",
+        )
+        disabled_images = []
+        for mode in ("shadow", "underglow", "chromatic-aberration"):
+            with self.subTest(mode=mode):
+                disabled = np.asarray(
+                    render(**options, wave_mode=mode, wave_opacity=0)
+                )
+                disabled_images.append(disabled)
+                zero_depth = np.asarray(
+                    render(
+                        **options,
+                        wave_mode=mode,
+                        wave_opacity=0,
+                        wave_depth=0,
+                    )
+                )
+                full = np.asarray(
+                    render(**options, wave_mode=mode, wave_opacity=1)
+                )
+                np.testing.assert_array_equal(disabled, zero_depth)
+                self.assertFalse(np.array_equal(disabled, full))
+        for disabled in disabled_images[1:]:
+            np.testing.assert_array_equal(disabled_images[0], disabled)
 
     def test_wave_modes_can_be_forced_and_repeat_with_the_same_seed(self):
         from unittest.mock import patch
@@ -506,7 +642,7 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(
             next(line for line in entropy_output.splitlines() if line.startswith("Width"))
             .split("|", 1)[1].strip(),
-            "2560",
+            "1920",
         )
         self.assertEqual(
             next(line for line in entropy_output.splitlines() if line.startswith("Height"))
@@ -528,10 +664,15 @@ class RenderTests(unittest.TestCase):
                 "Wave amplitude",
                 "Wave frequency",
                 "Wave depth",
+                "Wave opacity",
                 "Wave mode",
                 "Wave ends",
                 "Wave orientation",
                 "Wave side",
+                "Wave rotation",
+                "Zoom",
+                "Offset X",
+                "Offset Y",
                 "Gradient angle",
                 "Fine dither",
                 "Cloud spread",
@@ -580,9 +721,14 @@ class RenderTests(unittest.TestCase):
                 "#173B70", "#7165C8", "#F28A9B", "#FFB36B"
             ])
             self.assertTrue(0 <= settings["wave_amplitude"] <= 0.5)
-            self.assertLessEqual(settings["wave_amplitude"], 0.22)
+            self.assertLessEqual(settings["wave_amplitude"], 0.18)
             self.assertTrue(0 <= settings["wave_frequency"] <= 4)
             self.assertTrue(0 <= settings["wave_depth"] <= 1)
+            self.assertTrue(0.92 <= settings["wave_opacity"] <= 1)
+            self.assertTrue(-15 <= settings["wave_rotation"] <= 15)
+            self.assertTrue(0 <= settings["zoom"] <= 0.12)
+            self.assertTrue(-0.35 <= settings["offset_x"] <= 0.35)
+            self.assertTrue(-0.35 <= settings["offset_y"] <= 0.35)
             self.assertTrue(-360 <= settings["angle"] <= 360)
             self.assertTrue(0 <= settings["dither"] <= 1)
             self.assertTrue(0.03 <= settings["cloud_spread"] <= 0.5)
@@ -633,6 +779,11 @@ class RenderTests(unittest.TestCase):
                 "--wave-ends", "edge-to-edge",
                 "--wave-orientation", "vertical",
                 "--wave-side", "left",
+                "--wave-rotation", "8",
+                "--wave-opacity", "0.4",
+                "--zoom", "0.25",
+                "--offset-x", "0.5",
+                "--offset-y", "-0.25",
                 "--glue-points", "3",
                 "--glue-colors", "1",
                 "--glue-strength", "0.12",
@@ -658,6 +809,11 @@ class RenderTests(unittest.TestCase):
             self.assertEqual(original_settings["glue_spread"], 0.4)
             self.assertEqual(original_settings["halftone_strength"], 0.6)
             self.assertEqual(original_settings["grain_strength"], 0.3)
+            self.assertEqual(original_settings["wave_rotation"], 8)
+            self.assertEqual(original_settings["wave_opacity"], 0.4)
+            self.assertEqual(original_settings["zoom"], 0.25)
+            self.assertEqual(original_settings["offset_x"], 0.5)
+            self.assertEqual(original_settings["offset_y"], -0.25)
 
             updated_seed = invoke(
                 "--seed", original_seed,

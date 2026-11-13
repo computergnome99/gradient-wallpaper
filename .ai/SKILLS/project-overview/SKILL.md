@@ -34,11 +34,18 @@ desktop backgrounds. It is not a GUI application.
 - `gradient-wallpaper` defaults to `create`; `gradient-wallpaper create` is
   also supported. `gradient-wallpaper eval --seed VALUE` prints settings in a
   fixed order and resolves automatic wave choices.
-- The default image size is 2560x1080.
+- The default image size is 1920x1080.
 - Colors accept `#RGB` and `#RRGGBB`; omitted palettes are generated in HSL.
 - A self-contained seed stores colors and all render settings. Entropy-only
   text seeds deterministically generate omitted settings, which are included
   in the self-contained seed printed by `create`.
+- Wave rotation and overscan zoom/offset are randomized from seed entropy when
+  omitted, then stored for exact replay. The default random zoom stays close
+  to 1x.
+- Wave opacity is a seeded visibility control; zero disables wave lighting and
+  overlays. Random wave opacity stays close to full visibility.
+- Random cloud spread has a 0.12 minimum to avoid isolated small color spots;
+  explicit user settings retain the full supported spread range.
 - CLI options override stored values when used with a self-contained seed.
 - Supported output formats are PNG, JPEG, and WebP.
 
