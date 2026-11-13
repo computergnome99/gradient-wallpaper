@@ -251,20 +251,23 @@ def _classify_palette(
     return colors[primary_index], colors[accent_index], colors[gradient_indices]
 
 
-def _extract_chromatic_colors(
-    colors: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray | None]:
-    if len(colors) < 4:
-        return colors, None
+def _create_aberration_colors(colors: np.ndarray) -> np.ndarray:
+    if not len(colors):
+        raise ValueError("at least one palette color is required")
 
-    linear_colors = _srgb_to_linear(colors)
-    luminance = linear_colors @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
-    brightest_indices = np.argsort(luminance, kind="stable")[-2:]
-    gradient_indices = np.array(
-        [index for index in range(len(colors)) if index not in brightest_indices],
-        dtype=np.intp,
+    hls = np.asarray(
+        [colorsys.rgb_to_hls(*(color / 255)) for color in colors],
+        dtype=np.float32,
     )
-    return colors[gradient_indices], colors[brightest_indices]
+    average_lightness = float(hls[:, 1].mean())
+    average_saturation = float(hls[:, 2].mean())
+    return np.asarray(
+        [
+            colorsys.hls_to_rgb(hue, average_lightness, average_saturation)
+            for hue in (0, 1 / 3, 2 / 3)
+        ],
+        dtype=np.float32,
+    ) * 255
 
 
 def _create_point_cloud(
@@ -386,41 +389,52 @@ def _apply_wave_highlight(
     return 1 - (1 - image) * (1 - highlight_strength)
 
 
-def _apply_chromatic_aberration(
+def _apply_aberration(
     image: np.ndarray,
     mask: np.ndarray,
     colors: np.ndarray,
     depth: float,
     rng: np.random.Generator,
+    orientation: str,
 ) -> np.ndarray:
-    if len(colors) < 2 or mask.shape[0] < 2 or depth == 0:
+    if len(colors) != 3 or depth == 0:
         return image
 
-    edge = np.abs(np.gradient(mask, axis=0))
+    edge_axis = 0 if orientation == "horizontal" else 1
+    if mask.shape[edge_axis] < 2:
+        return image
+
+    edge = np.abs(np.gradient(mask, axis=edge_axis))
     peak = float(edge.max())
     if peak <= 1e-6:
         return image
     edge /= peak
 
     max_offset = max(1, min(8, round(min(image.shape[:2]) * 0.006)))
-    directions = [-1, 1]
-    if rng.integers(0, 2):
-        directions.reverse()
-
-    result = image
+    directions = rng.permutation((-1, 0, 1))
+    contribution = np.zeros_like(image)
     for color, direction in zip(colors, directions):
         offset = int(rng.integers(1, max_offset + 1))
         shifted_edge = np.zeros_like(edge)
-        if direction < 0:
-            shifted_edge[:-offset] = edge[offset:]
+        if direction == 0:
+            shifted_edge = edge
+        elif direction < 0:
+            destination = [slice(None), slice(None)]
+            source = [slice(None), slice(None)]
+            destination[edge_axis] = slice(None, -offset)
+            source[edge_axis] = slice(offset, None)
+            shifted_edge[tuple(destination)] = edge[tuple(source)]
         else:
-            shifted_edge[offset:] = edge[:-offset]
+            destination = [slice(None), slice(None)]
+            source = [slice(None), slice(None)]
+            destination[edge_axis] = slice(offset, None)
+            source[edge_axis] = slice(None, -offset)
+            shifted_edge[tuple(destination)] = edge[tuple(source)]
 
-        strength = float(rng.uniform(0.12, 0.22)) * depth
-        alpha = (shifted_edge * strength)[..., None]
+        strength = float(rng.uniform(0.1, 0.18)) * depth
         linear_color = _srgb_to_linear(color[None, :])[0]
-        result = result * (1 - alpha) + linear_color * alpha
-    return result
+        contribution += (shifted_edge * strength)[..., None] * linear_color
+    return np.clip(image + contribution, 0, 1)
 
 
 def _apply_glue_layer(
@@ -537,14 +551,14 @@ def _apply_film_grain(
 def resolve_wave_options(
     colors: list[tuple[int, int, int]],
     seed: str,
-    wave_mode: str = "auto",
+    wave_edge: str = "auto",
     wave_ends: str = "auto",
     wave_orientation: str = "auto",
     wave_side: str = "auto",
 ) -> tuple[str, str, str, str]:
     """Resolve seeded automatic wave options to their effective values."""
-    if wave_mode not in {"auto", "shadow", "underglow", "chromatic-aberration"}:
-        raise ValueError(f"unknown wave mode {wave_mode!r}")
+    if wave_edge not in {"auto", "shadow", "underglow", "aberration"}:
+        raise ValueError(f"unknown wave edge {wave_edge!r}")
     if wave_ends not in {"auto", "fade", "edge-to-edge"}:
         raise ValueError(f"unknown wave ends style {wave_ends!r}")
     if wave_orientation not in {"auto", "horizontal", "vertical"}:
@@ -583,23 +597,19 @@ def resolve_wave_options(
         if selected_orientation == "vertical"
         else "right"
     )
-    mode_options = ["shadow"]
+    mode_options = ["shadow", "aberration"]
     if accent_color is not None:
         mode_options.append("underglow")
-    if len(gradient_colors) + (accent_color is not None) >= 4:
-        mode_options.append("chromatic-aberration")
-    if wave_mode != "auto" and wave_mode not in mode_options:
-        if wave_mode == "underglow":
+    if wave_edge != "auto" and wave_edge not in mode_options:
+        if wave_edge == "underglow":
             raise ValueError("underglow mode requires a suitable accent color")
-        raise ValueError(
-            "chromatic-aberration mode requires at least four non-primary colors"
-        )
-    selected_mode = (
+        raise ValueError(f"unknown or unavailable wave edge {wave_edge!r}")
+    selected_edge = (
         mode_options[int(mode_rng.integers(0, len(mode_options)))]
-        if wave_mode == "auto"
-        else wave_mode
+        if wave_edge == "auto"
+        else wave_edge
     )
-    return selected_mode, selected_ends, selected_orientation, selected_side
+    return selected_edge, selected_ends, selected_orientation, selected_side
 
 
 def render(
@@ -613,7 +623,7 @@ def render(
     dither: float = 0.5,
     cloud_spread: float = 0.18,
     wave_depth: float = 0.75,
-    wave_mode: str = "auto",
+    wave_edge: str = "auto",
     wave_ends: str = "auto",
     wave_orientation: str = "auto",
     wave_side: str = "auto",
@@ -679,10 +689,10 @@ def render(
     primary_color, accent_color, gradient_colors = _classify_palette(palette)
     primary_linear = _srgb_to_linear(primary_color[None, :])[0]
 
-    mode, selected_ends, selected_orientation, selected_side = resolve_wave_options(
+    edge, selected_ends, selected_orientation, selected_side = resolve_wave_options(
         colors,
         seed,
-        wave_mode,
+        wave_edge,
         wave_ends,
         wave_orientation,
         wave_side,
@@ -702,18 +712,18 @@ def render(
         wave_rotation=wave_rotation,
     )
     underglow = _create_wave_underglow_mask(mask, selected_orientation)
-    aberration_colors = None
     if (
-        (mode != "underglow" or wave_opacity == 0)
+        (edge != "underglow" or wave_opacity == 0)
         and accent_color is not None
     ):
         gradient_colors = np.concatenate(
             (gradient_colors, accent_color[None, :]), axis=0
         )
-    if mode == "chromatic-aberration" and wave_opacity > 0:
-        gradient_colors, aberration_colors = _extract_chromatic_colors(
-            gradient_colors
-        )
+    aberration_colors = (
+        _create_aberration_colors(palette)
+        if edge == "aberration" and wave_opacity > 0
+        else None
+    )
 
     background_gradient = _create_point_cloud(
         canvas_width, canvas_height, gradient_colors, rng, cloud_spread, angle
@@ -728,14 +738,14 @@ def render(
         angle + rng.uniform(55, 125),
     )
     effective_wave_depth = wave_depth * wave_opacity
-    if mode == "shadow" and wave_opacity > 0:
+    if edge == "shadow" and wave_opacity > 0:
         background = _apply_wave_shadow(
             background,
             shadow,
             effective_wave_depth,
             _darkest_palette_color(palette),
         )
-    elif mode == "underglow" and wave_opacity > 0:
+    elif edge == "underglow" and wave_opacity > 0:
         background = _apply_wave_underglow(
             background,
             underglow,
@@ -743,14 +753,19 @@ def render(
             _srgb_to_linear(accent_color[None, :])[0],
         )
     image = _screen_blend(background, wave, mask * wave_opacity)
-    if mode == "chromatic-aberration" and wave_opacity > 0:
+    if edge == "aberration" and wave_opacity > 0:
         if aberration_colors is None:
-            raise RuntimeError("chromatic aberration mode has no edge colors")
-        image = _apply_chromatic_aberration(
-            image, mask, aberration_colors, effective_wave_depth, rng
+            raise RuntimeError("aberration edge has no RGB fringe colors")
+        image = _apply_aberration(
+            image,
+            mask,
+            aberration_colors,
+            effective_wave_depth,
+            rng,
+            selected_orientation,
         )
-    elif mode in {"shadow", "underglow"} and wave_opacity > 0:
-        highlight_intensity = 0.5 if mode == "underglow" else 1.0
+    elif edge in {"shadow", "underglow"} and wave_opacity > 0:
+        highlight_intensity = 0.5 if edge == "underglow" else 1.0
         image = _apply_wave_highlight(
             image,
             highlight,
