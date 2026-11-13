@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gradient-wallpaper"
+version = "0.1.0"
+description = "Generate seeded, wave-shaped gradient desktop backgrounds."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "Pillow>=10",
+]
+
+[project.optional-dependencies]
+build = [
+    "pyinstaller>=6.10",
+]
+
+[project.scripts]
+gradient-wallpaper = "gradient_wallpaper.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["gradient_wallpaper*"]

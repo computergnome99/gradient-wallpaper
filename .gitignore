@@ -1,0 +1,22 @@
+# Python environments and bytecode
+.venv/
+__pycache__/
+*.py[cod]
+
+# Packaging and build output
+build/
+dist/
+*.egg-info/
+*.spec
+
+# Test and editor caches
+.pytest_cache/
+.coverage
+.DS_Store
+Thumbs.db
+
+# Generated files
+*.png
+*.jpg
+*.jpeg
+*.webp
