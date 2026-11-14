@@ -10,7 +10,8 @@ A small tool to quickly generate gradient backgrounds.
 ## Getting started
 
 The easiest way to use this project is to download the pre-built binary from the
-[releases](./releases). Simply download and [run](#usage).
+[releases](https://github.com/computergnome99/gradient-wallpaper/releases).
+Simply download and [run](#usage).
 
 If you'd rather run the code locally, clone the project and use the following
 commands. Python 3.10 or later is required.
