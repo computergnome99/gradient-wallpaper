@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import colorsys
 import secrets
+from collections.abc import Callable
 
 import numpy as np
 from PIL import Image, ImageFilter
@@ -284,6 +285,7 @@ def _create_point_cloud(
     rng: np.random.Generator,
     cloud_spread: float,
     angle: float,
+    progress_callback: Callable[[float], None] | None = None,
 ) -> np.ndarray:
     """Splat colored points around a warped color field, blending in linear light."""
     low_width = max(1, (width + 1) // 2)
@@ -317,6 +319,7 @@ def _create_point_cloud(
 
     point_count = max(2, min(5, 14 // len(colors)))
     band_width = max(0.06, 0.55 / max(1, len(colors) - 1))
+    total_points = len(linear_colors) * point_count
     for color_index, color in enumerate(linear_colors):
         target = color_index / max(1, len(colors) - 1)
         candidates = np.flatnonzero(np.abs(flat_position - target) <= band_width)
@@ -328,7 +331,7 @@ def _create_point_cloud(
         centers = rng.choice(
             candidates, size=point_count, replace=candidates.size < point_count
         )
-        for center in centers:
+        for point_index, center in enumerate(centers):
             center_y, center_x = divmod(int(center), low_width)
             center_x /= max(1, low_width - 1)
             center_y /= max(1, low_height - 1)
@@ -341,6 +344,9 @@ def _create_point_cloud(
             weight = np.exp(-0.5 * distance) * strength
             accumulated += weight[..., None] * color
             total_weight += weight
+            if progress_callback is not None:
+                completed = color_index * point_count + point_index + 1
+                progress_callback(completed / total_points)
 
     cloud = accumulated / total_weight[..., None]
     channels = [
@@ -456,6 +462,7 @@ def _apply_glue_layer(
     point_count: int,
     strength: float,
     spread: float,
+    progress_callback: Callable[[float], None] | None = None,
 ) -> np.ndarray:
     unique_colors = np.unique(colors, axis=0)
     if point_count == 0 or strength == 0:
@@ -483,6 +490,8 @@ def _apply_glue_layer(
         )[..., None]
         color = mixed_colors[point_index]
         result = result * (1 - alpha) + color * alpha
+        if progress_callback is not None:
+            progress_callback((point_index + 1) / point_count)
     return result
 
 
@@ -649,6 +658,7 @@ def render(
     offset_x: float = 0.0,
     offset_y: float = 0.0,
     wave_opacity: float = 1.0,
+    progress_callback: Callable[[int, str], None] | None = None,
 ) -> Image.Image:
     """Render a wave-shaped point-cloud gradient with seeded dithering."""
     if width < 1 or height < 1:
@@ -685,6 +695,21 @@ def render(
         raise ValueError("grain strength must be between 0 and 1")
     if seed is None:
         seed = secrets.token_hex(8)
+
+    def report_progress(percent: int, phase: str) -> None:
+        if progress_callback is not None:
+            progress_callback(percent, phase)
+
+    def stage_progress(
+        start: int, end: int, phase: str
+    ) -> Callable[[float], None] | None:
+        if progress_callback is None:
+            return None
+        return lambda fraction: report_progress(
+            round(start + (end - start) * fraction), phase
+        )
+
+    report_progress(0, "Preparing wave")
     output_width, output_height = width, height
     overscale = 1 + zoom
     canvas_width = max(width, int(np.ceil(width * overscale)))
@@ -732,10 +757,18 @@ def render(
     )
     effective_cloud_spread = 0.03 + cloud_spread * 0.47
 
+    report_progress(5, "Background gradient")
     background_gradient = _create_point_cloud(
-        canvas_width, canvas_height, gradient_colors, rng, effective_cloud_spread, angle
+        canvas_width,
+        canvas_height,
+        gradient_colors,
+        rng,
+        effective_cloud_spread,
+        angle,
+        progress_callback=stage_progress(5, 40, "Background gradient"),
     )
     background = primary_linear + (background_gradient - primary_linear) * 0.7
+    report_progress(40, "Wave gradient")
     wave = _create_point_cloud(
         canvas_width,
         canvas_height,
@@ -743,7 +776,9 @@ def render(
         rng,
         effective_cloud_spread,
         angle + rng.uniform(55, 125),
+        progress_callback=stage_progress(40, 75, "Wave gradient"),
     )
+    report_progress(76, "Compositing wave")
     effective_wave_edge_strength = wave_edge_strength * wave_opacity
     if edge == "shadow" and wave_opacity > 0:
         background = _apply_wave_shadow(
@@ -777,6 +812,7 @@ def render(
             highlight,
             effective_wave_edge_strength,
         )
+    report_progress(82, "Blending colors")
     image = _apply_glue_layer(
         image,
         palette,
@@ -784,7 +820,9 @@ def render(
         glue_points,
         glue_strength,
         glue_spread,
+        progress_callback=stage_progress(82, 90, "Blending colors"),
     )
+    report_progress(90, "Post-processing")
     srgb = np.where(
         image <= 0.0031308,
         image * 12.92,
@@ -799,8 +837,9 @@ def render(
     srgb = _apply_film_grain(srgb, grain_strength, grain_rng)
     pixels = np.clip(srgb * 255, 0, 255).astype(np.uint8)
     image = Image.fromarray(pixels)
+    report_progress(97, "Cropping image")
     left = round((canvas_width - output_width) * (offset_x + 1) / 2)
     top = round((canvas_height - output_height) * (offset_y + 1) / 2)
-    return image.crop(
-        (left, top, left + output_width, top + output_height)
-    )
+    cropped = image.crop((left, top, left + output_width, top + output_height))
+    report_progress(98, "Ready to save")
+    return cropped

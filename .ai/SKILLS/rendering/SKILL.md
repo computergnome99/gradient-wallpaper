@@ -40,6 +40,10 @@ fractional size. `glue_strength` is normalized to 0–1 and mapped to an interna
 maximum opacity of 0.25. When randomizing cloud spread, keep its effective
 minimum large enough to avoid isolated colored point blobs.
 
+The optional `render(..., progress_callback=...)` reports monotonic integer
+percentages and phase labels. Keep callback reports tied to actual pipeline
+work; the CLI renders them as a terminal-only progress bar on stderr.
+
 ## Determinism
 
 The render entry point is `render(...)`. It uses NumPy generators derived from

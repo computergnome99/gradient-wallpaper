@@ -58,6 +58,10 @@ gradient-wallpaper --width 3840 --height 2160 \
   --colors "#071952" "#088395" "#35a29f" --seed 42
 ```
 
+When run in an interactive terminal, the CLI displays a percentage progress bar
+for rendering and saving. It writes to stderr, keeping the image path and seed
+on stdout clean; redirected/non-interactive runs do not show the bar.
+
 Provide any number of color stops (at least one). Colors accept `#RGB` and
 `#RRGGBB` notation. The least saturated color is the primary in mixed-brightness
 palettes; when most colors are bright or dark, the brightest or darkest color

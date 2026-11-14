@@ -108,6 +108,61 @@ class RenderTests(unittest.TestCase):
         second = np.asarray(render(**options))
         np.testing.assert_array_equal(first, second)
 
+    def test_progress_callback_reports_monotonic_render_stages(self):
+        events = []
+        image = render(
+            32,
+            20,
+            [(10, 20, 30), (100, 110, 120), (220, 180, 90)],
+            "progress",
+            progress_callback=lambda percent, phase: events.append(
+                (percent, phase)
+            ),
+        )
+
+        self.assertEqual(image.size, (32, 20))
+        percentages = [percent for percent, _ in events]
+        self.assertEqual(percentages[0], 0)
+        self.assertEqual(percentages[-1], 98)
+        self.assertEqual(percentages, sorted(percentages))
+        phases = {phase for _, phase in events}
+        self.assertIn("Background gradient", phases)
+        self.assertIn("Wave gradient", phases)
+        self.assertIn("Post-processing", phases)
+
+    def test_terminal_progress_display_shows_percent_only_for_tty(self):
+        from io import StringIO
+        from unittest.mock import patch
+
+        from gradient_wallpaper.cli import _ProgressDisplay
+
+        output = StringIO()
+        with patch("sys.stderr") as stderr:
+            stderr.isatty.return_value = True
+            stderr.write.side_effect = output.write
+            stderr.flush.side_effect = output.flush
+            with _ProgressDisplay() as progress:
+                progress.update(25, "Rendering")
+                progress.update(80, "Saving")
+        self.assertIn("25%", output.getvalue())
+        self.assertIn("80%", output.getvalue())
+        self.assertIn("100%", output.getvalue())
+        rendered_lines = [
+            line.rstrip("\n") for line in output.getvalue().split("\r")[1:]
+        ]
+        self.assertEqual(
+            len(rendered_lines[-1]),
+            max(len(line) for line in rendered_lines[:-1]),
+        )
+
+        output = StringIO()
+        with patch("sys.stderr") as stderr:
+            stderr.isatty.return_value = False
+            stderr.write.side_effect = output.write
+            with _ProgressDisplay() as progress:
+                progress.update(25, "Rendering")
+        self.assertEqual(output.getvalue(), "")
+
     def test_normalized_cloud_spread_maps_to_supported_internal_range(self):
         from unittest.mock import patch
 

@@ -22,6 +22,8 @@ description: Python coding style, argument parsing, validation, and command beha
 - Numeric visual options accept `random` or `unset` to draw a fresh value per
   invocation; the emitted self-contained seed records it for exact replay.
   Width and height remain explicit pixel sizes.
+- Keep progress display on stderr and enable it only for interactive terminals;
+  final image/seed output on stdout must remain script-friendly.
 - Reuse existing color parsing, color ordering, bounded numeric validators,
   and seed-resolution helpers instead of duplicating them.
 - Do not add a dependency for functionality available in the standard library,

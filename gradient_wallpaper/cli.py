@@ -42,6 +42,41 @@ DEFAULT_SETTINGS: SeedSettings = {
 _RANDOM_SENTINEL = "random"
 
 
+class _ProgressDisplay:
+    def __init__(self) -> None:
+        self.enabled = sys.stderr.isatty()
+        self.last_percent = -1
+        self.last_phase = ""
+        self.last_line_length = 0
+
+    def __enter__(self) -> _ProgressDisplay:
+        return self
+
+    def __exit__(self, exception_type, exception, traceback) -> bool:
+        if self.enabled and self.last_percent >= 0:
+            if exception_type is None:
+                self.update(100, "Done")
+            sys.stderr.write("\n")
+            sys.stderr.flush()
+        return False
+
+    def update(self, percent: int, phase: str) -> None:
+        if not self.enabled:
+            return
+        percent = min(100, max(self.last_percent, percent))
+        if percent == self.last_percent and phase == self.last_phase:
+            return
+        width = 24
+        filled = round(width * percent / 100)
+        bar = "#" * filled + "-" * (width - filled)
+        line = f"[{bar}] {percent:3d}% {phase}"
+        self.last_line_length = max(self.last_line_length, len(line))
+        sys.stderr.write(f"\r{line:<{self.last_line_length}}")
+        sys.stderr.flush()
+        self.last_percent = percent
+        self.last_phase = phase
+
+
 def _default_settings() -> SeedSettings:
     return {**DEFAULT_SETTINGS, "colors": list(DEFAULT_COLORS)}
 
@@ -603,40 +638,6 @@ def _create(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
 
     if not settings["colors"]:
         parser.error("at least one color is required")
-    try:
-        colors = order_colors(
-            [parse_color(color) for color in settings["colors"]],
-            settings["color_order"],
-        )
-        image = render(
-            width=settings["width"],
-            height=settings["height"],
-            colors=colors,
-            seed=entropy,
-            wave_amplitude=settings["wave_amplitude"],
-            wave_frequency=settings["wave_frequency"],
-            wave_opacity=settings["wave_opacity"],
-            angle=settings["angle"],
-            dither=settings["dither"],
-            cloud_spread=settings["cloud_spread"],
-            wave_edge_strength=settings["wave_edge_strength"],
-            wave_edge=settings["wave_edge"],
-            wave_ends=settings["wave_ends"],
-            wave_orientation=settings["wave_orientation"],
-            wave_side=settings["wave_side"],
-            wave_rotation=settings["wave_rotation"],
-            zoom=settings["zoom"],
-            offset_x=settings["offset_x"],
-            offset_y=settings["offset_y"],
-            glue_points=settings["glue_points"],
-            glue_strength=settings["glue_strength"],
-            glue_spread=settings["glue_spread"],
-            halftone_strength=settings["halftone_strength"],
-            grain_strength=settings["grain_strength"],
-        )
-    except (TypeError, ValueError) as error:
-        parser.error(str(error))
-
     seed = encode_seed(entropy, settings)
     output_format = args.format or args.output.suffix.lstrip(".") or "png"
     output_format = {"jpg": "jpeg"}.get(output_format.lower(), output_format.lower())
@@ -644,7 +645,46 @@ def _create(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
         parser.error("output extension must be .png, .jpg/.jpeg, or .webp")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     save_options = {"quality": 95, "subsampling": 0} if output_format == "jpeg" else {}
-    image.save(args.output, format=output_format.upper(), **save_options)
+    with _ProgressDisplay() as progress:
+        try:
+            colors = order_colors(
+                [parse_color(color) for color in settings["colors"]],
+                settings["color_order"],
+            )
+            image = render(
+                width=settings["width"],
+                height=settings["height"],
+                colors=colors,
+                seed=entropy,
+                wave_amplitude=settings["wave_amplitude"],
+                wave_frequency=settings["wave_frequency"],
+                wave_opacity=settings["wave_opacity"],
+                angle=settings["angle"],
+                dither=settings["dither"],
+                cloud_spread=settings["cloud_spread"],
+                wave_edge_strength=settings["wave_edge_strength"],
+                wave_edge=settings["wave_edge"],
+                wave_ends=settings["wave_ends"],
+                wave_orientation=settings["wave_orientation"],
+                wave_side=settings["wave_side"],
+                wave_rotation=settings["wave_rotation"],
+                zoom=settings["zoom"],
+                offset_x=settings["offset_x"],
+                offset_y=settings["offset_y"],
+                glue_points=settings["glue_points"],
+                glue_strength=settings["glue_strength"],
+                glue_spread=settings["glue_spread"],
+                halftone_strength=settings["halftone_strength"],
+                grain_strength=settings["grain_strength"],
+                progress_callback=(
+                    progress.update if progress.enabled else None
+                ),
+            )
+        except (TypeError, ValueError) as error:
+            parser.error(str(error))
+
+        progress.update(99, "Saving image")
+        image.save(args.output, format=output_format.upper(), **save_options)
     print(
         f"Saved {settings['width']}x{settings['height']} {output_format.upper()} image to "
         f"{args.output}\nseed: {seed}"
