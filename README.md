@@ -4,6 +4,8 @@
 
 A small tool to quickly generate gradient backgrounds.
 
+[![Tests](https://github.com/computergnome99/gradient-wallpaper/actions/workflows/tests.yml/badge.svg)](https://github.com/computergnome99/gradient-wallpaper/actions/workflows/tests.yml)
+
 ## Getting started
 
 The easiest way to use this project is to download the pre-built binary from the
