@@ -63,15 +63,16 @@ Provide any number of color stops (at least one). Colors accept `#RGB` and
 palettes; when most colors are bright or dark, the brightest or darkest color
 is used instead. The seeded renderer chooses between a subtractive,
 palette-colored shadow with directional highlight; an additive accent underglow
-with a softer directional highlight; and, when at least four non-primary colors
-are available, subtle chromatic fringes using the two brightest colors. With
-fewer colors, aberration is omitted. Colors not reserved for the selected
-effect form both point-cloud gradients, with different point placements and
-orientations. With one or two stops, no accent is reserved and both stops
-remain available to the gradients. `--color-order hue` sorts stops along the
-shortest arc through HSV hue, useful for palettes that cross the red hue
-boundary. With one stop, both layers use tonal variants of that color. Quote
-`#`-prefixed colors in shells where `#` starts a comment.
+behind the wave on the background side of its edge; and traditional additive
+RGB aberration fringes. The aberration colors use red, green, and blue hues with the palette's
+average HSL saturation and lightness, so they harmonize with the image without
+requiring or reserving extra palette colors. Their separation increases
+slightly with `--wave-edge-strength`. The accent is reserved for
+underglow and otherwise remains available to both point-cloud gradients, which
+use different point placements and orientations. `--color-order hue` sorts
+stops along the shortest arc through HSV hue, useful for palettes that cross the
+red hue boundary. With one stop, both layers use tonal variants of that color.
+Quote `#`-prefixed colors in shells where `#` starts a comment.
 
 When settings are provided, the CLI prints a self-contained seed containing
 the colors, render settings, and procedural entropy used for the image. Save
@@ -100,18 +101,26 @@ file format are not stored in the seed. Legacy text/numeric seeds are still
 accepted as procedural entropy, randomize omitted visual settings from that
 entropy, and are returned as self-contained seeds. Self-contained seeds have
 no textual prefix; the CLI distinguishes them from entropy-only text seeds by
-their encoded payload. Version-3 and version-4 self-contained seeds remain
-readable. Version 3 receives neutral rotation, zoom, and offset settings; both
-versions default the new opacity setting to full.
+their encoded payload. Version-3 through version-7 self-contained seeds remain
+readable. Older wave mode/depth names and cloud/glue scales are migrated to
+current settings.
+
+For any numeric visual setting, pass `random` (or `unset`) to reroll just that
+setting. Each invocation draws a fresh value, while preserving all other
+settings from a self-contained seed. The printed seed stores the selected value
+so that exact result can be replayed; rerunning the command with the original
+seed draws a new value. Dimensions remain explicit pixel sizes and do not
+accept the random sentinel.
 
 Without a self-contained seed, omitted visual settings are randomized and
 baked into the printed seed. Random wave amplitude and frequency avoid near-flat
 values: amplitude ranges from 0.06 to 0.18 and frequency from 1.5 to 4, both
-biased toward their upper ends. Random cloud spread stays between 0.12 and 0.5
-to avoid isolated small color spots. If colors are omitted, a random 3–6 color
-HSL palette is created;
-wave mode, orientation, end treatment, vertical foreground side, wave rotation,
-zoom/offset, and glue-layer settings are chosen from the seed, along with
+biased toward their upper ends. Effective random cloud spread stays between
+0.12 and 0.5 to avoid isolated small color spots; the CLI stores it on a
+normalized 0–1 scale. If colors are omitted, a random 3–6 color HSL palette is
+created; wave-edge treatment, orientation, end treatment, vertical foreground
+side, wave rotation, zoom/offset, and glue-layer settings are chosen from the
+seed, along with
 randomized halftone and grain strengths. Width and height remain `1920x1080`
 unless specified. Random wave opacity stays between 0.92 and 1 and is biased
 very heavily toward full opacity. Random rotation stays within ±15 degrees;
@@ -121,9 +130,9 @@ Optional controls:
 ```text
 --wave-amplitude 0.22  Base wave amplitude (varied by seed), from 0 to 0.5
 --wave-frequency 1    Base path detail (varied by seed), from 0 to 20
---wave-depth 0.75     Wave lighting and chromatic effect strength, from 0 to 1
+--wave-edge-strength 0.75  Strength of all wave-edge treatments, from 0 to 1
 --wave-opacity 1      Wave visibility, from 0 (off) to 1 (full)
---wave-mode auto      auto, shadow, underglow, or chromatic-aberration
+--wave-edge auto      auto, shadow, underglow, or aberration
 --wave-ends auto      auto, fade, or edge-to-edge
 --wave-orientation auto  auto, horizontal, or vertical
 --wave-side auto      auto, left, or right foreground side for vertical waves
@@ -133,10 +142,9 @@ Optional controls:
 --offset-y 0          Vertical offset in the overscan area, -1 to 1
 --angle 20            Background point-cloud gradient direction
 --dither 0.5          Dithering strength, from 0 (off) to 1
---cloud-spread 0.18   Gaussian point size/spread, from 0.03 to 0.5
+--cloud-spread 0.32   Normalized Gaussian point spread, from 0 to 1
 --glue-points 2       Number of faint blending points, from 0 to 8 (0 disables)
---glue-colors 2       Number of colors used by the glue layer, 1 or 2
---glue-strength 0.07  Glue-layer opacity, from 0 to 0.25
+--glue-strength 0.28  Normalized glue-layer opacity, from 0 to 1
 --glue-spread 0.35    Glue-point size as a fraction of image dimensions
 --halftone-strength 0.25  Ordered dot dithering, from 0 (off) to 1
 --grain-strength 0.1      Film grain, from 0 (off) to 1
@@ -144,24 +152,35 @@ Optional controls:
 --format png          png, jpeg, or webp (otherwise inferred from the extension)
 ```
 
-Choose `--wave-mode` to force a treatment; `auto` (the default) selects one
-using a separate random stream derived from the seed. Forcing a mode does not
-replace the seed, so the same seed and mode remain reproducible. Underglow
-requires a suitable accent color, and chromatic aberration requires at least
-four non-primary colors. Run `gradient-wallpaper create --help` for create
-options or `gradient-wallpaper eval --help` for seed evaluation usage.
+For numeric visual options, the example values above may be replaced with
+`random` (or `unset`) to reroll that setting from a seed.
+
+Choose `--wave-edge` to force a treatment; `auto` (the default) selects one
+using a separate random stream derived from the seed. Forcing an edge treatment
+does not replace the seed, so the same seed and treatment remain reproducible. Underglow
+requires a suitable accent color; aberration works with any palette size. The
+cloud-spread control maps 0–1 to the renderer's 0.03–0.5 point-size range, and
+glue-strength maps 0–1 to its 0–0.25 opacity range. Glue points blend all
+provided palette colors together in linear light. Run
+`gradient-wallpaper create --help` for create options or
+`gradient-wallpaper eval --help` for seed evaluation usage.
 
 `--wave-ends` and `--wave-orientation` also accept `auto`, using separate
 seed-derived choices, or can be explicitly set. `edge-to-edge` keeps the wave
 at full strength where it meets the image boundaries; `fade` retains the
 softened ends. Vertical orientation runs the wave from top to bottom instead
-of left to right. Underglow is centered on the wave edge and follows its end
-fade. Vertical waves choose a seeded left/right foreground side; set
+of left to right. Underglow adds a broad, one-sided accent glow behind the wave
+on the background side of the edge, while preserving the wave's gradient and
+highlight; the glow follows the wave's end fade. Vertical waves choose a
+seeded left/right foreground side; set
 `--wave-side left` or `--wave-side right` to force one (which also selects
 vertical orientation when `--wave-orientation` is `auto`).
 `--wave-opacity 0` disables the wave layer and all wave lighting/effects;
 intermediate values fade the whole wave treatment. If omitted, opacity is
 randomized very slightly and stays close to full visibility.
+`--wave-edge-strength` adjusts the intensity of shadow, underglow, highlights,
+and aberration independently of the overall wave opacity. Shadow darkening is
+compressed toward the high end to retain more image detail.
 `--wave-rotation` tilts the wave and its lighting together, for either
 orientation. `--zoom` ranges from `0` (no zoom) to `1` (2x zoom). It renders a
 larger canvas and crops it back to the requested dimensions without scaling the

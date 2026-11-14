@@ -1,3 +1,4 @@
+import colorsys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,15 +10,16 @@ from gradient_wallpaper.render import (
     _apply_wave_highlight,
     _apply_wave_shadow,
     _apply_wave_underglow,
-    _apply_chromatic_aberration,
+    _apply_aberration,
     _apply_glue_layer,
     _apply_halftone_dither,
     _apply_film_grain,
     _create_wave_layers,
     _create_wave_underglow_mask,
     _classify_palette,
+    _create_aberration_colors,
     _darkest_palette_color,
-    _extract_chromatic_colors,
+    _create_point_cloud,
     _screen_blend,
     order_colors,
     parse_color,
@@ -42,6 +44,11 @@ class RenderTests(unittest.TestCase):
             self.assertIn(heading, help_text)
         self.assertIn("--offset-x", help_text)
         self.assertIn("--offset-y", help_text)
+        self.assertIn("--wave-edge", help_text)
+        self.assertIn("aberration", help_text)
+        self.assertNotIn("--wave-mode", help_text)
+        self.assertNotIn("--wave-depth", help_text)
+        self.assertNotIn("--glue-colors", help_text)
         self.assertNotIn("--crop-x", help_text)
         self.assertNotIn("--crop-y", help_text)
 
@@ -73,9 +80,9 @@ class RenderTests(unittest.TestCase):
         self.assertLessEqual(max(amplitudes), 0.18)
         self.assertGreaterEqual(min(frequencies), 1.5)
         self.assertLessEqual(max(frequencies), 4.0)
-        self.assertGreaterEqual(min(cloud_spreads), 0.12)
-        self.assertGreater(float(np.mean(cloud_spreads)), 0.3)
-        self.assertLessEqual(max(cloud_spreads), 0.5)
+        self.assertGreaterEqual(min(cloud_spreads), (0.12 - 0.03) / 0.47)
+        self.assertGreater(float(np.mean(cloud_spreads)), 0.6)
+        self.assertLessEqual(max(cloud_spreads), 1)
         self.assertGreaterEqual(min(opacities), 0.92)
         self.assertGreater(float(np.mean(opacities)), 0.98)
         self.assertLessEqual(max(opacities), 1.0)
@@ -100,6 +107,29 @@ class RenderTests(unittest.TestCase):
         first = np.asarray(render(**options))
         second = np.asarray(render(**options))
         np.testing.assert_array_equal(first, second)
+
+    def test_normalized_cloud_spread_maps_to_supported_internal_range(self):
+        from unittest.mock import patch
+
+        options = dict(
+            width=16,
+            height=8,
+            colors=[(20, 40, 80), (120, 160, 200), (240, 180, 90)],
+            seed="cloud-spread-scale",
+            wave_edge="shadow",
+            glue_points=0,
+            glue_strength=0,
+            dither=0,
+        )
+        for scale, expected_spread in ((0, 0.03), (1, 0.5)):
+            with self.subTest(scale=scale), patch(
+                "gradient_wallpaper.render._create_point_cloud",
+                wraps=_create_point_cloud,
+            ) as point_cloud:
+                render(**options, cloud_spread=scale)
+                self.assertEqual(point_cloud.call_count, 2)
+                for call in point_cloud.call_args_list:
+                    self.assertAlmostEqual(call.args[4], expected_spread)
 
     def test_wave_rotation_tilts_horizontal_and_vertical_masks(self):
         for orientation in ("horizontal", "vertical"):
@@ -182,29 +212,29 @@ class RenderTests(unittest.TestCase):
             seed="wave-opacity",
         )
         disabled_images = []
-        for mode in ("shadow", "underglow", "chromatic-aberration"):
+        for mode in ("shadow", "underglow", "aberration"):
             with self.subTest(mode=mode):
                 disabled = np.asarray(
-                    render(**options, wave_mode=mode, wave_opacity=0)
+                    render(**options, wave_edge=mode, wave_opacity=0)
                 )
                 disabled_images.append(disabled)
                 zero_depth = np.asarray(
                     render(
                         **options,
-                        wave_mode=mode,
+                        wave_edge=mode,
                         wave_opacity=0,
-                        wave_depth=0,
+                        wave_edge_strength=0,
                     )
                 )
                 full = np.asarray(
-                    render(**options, wave_mode=mode, wave_opacity=1)
+                    render(**options, wave_edge=mode, wave_opacity=1)
                 )
                 np.testing.assert_array_equal(disabled, zero_depth)
                 self.assertFalse(np.array_equal(disabled, full))
         for disabled in disabled_images[1:]:
             np.testing.assert_array_equal(disabled_images[0], disabled)
 
-    def test_wave_modes_can_be_forced_and_repeat_with_the_same_seed(self):
+    def test_wave_edges_can_be_forced_and_repeat_with_the_same_seed(self):
         from unittest.mock import patch
 
         colors = [
@@ -229,17 +259,17 @@ class RenderTests(unittest.TestCase):
                 wraps=_apply_wave_highlight,
             ) as highlight,
             patch(
-                "gradient_wallpaper.render._apply_chromatic_aberration",
-                wraps=_apply_chromatic_aberration,
+                "gradient_wallpaper.render._apply_aberration",
+                wraps=_apply_aberration,
             ) as aberration,
         ):
-            for mode in ("shadow", "underglow", "chromatic-aberration"):
+            for mode in ("shadow", "underglow", "aberration"):
                 options = dict(
                     width=32,
                     height=24,
                     colors=colors,
                     seed="forced-mode",
-                    wave_mode=mode,
+                    wave_edge=mode,
                     dither=0,
                 )
                 first = np.asarray(render(**options))
@@ -255,18 +285,18 @@ class RenderTests(unittest.TestCase):
                     call.kwargs.get("intensity", 1.0)
                     for call in highlight.call_args_list
                 ],
-                [1.0, 1.0, 0.5, 0.5],
+                [1.0, 1.0, 1.0, 1.0],
             )
 
-    def test_forced_chromatic_mode_requires_enough_palette_colors(self):
-        with self.assertRaisesRegex(ValueError, "four non-primary colors"):
-            render(
-                16,
-                8,
-                [(10, 20, 30), (80, 100, 120), (200, 220, 240)],
-                "too-few",
-                wave_mode="chromatic-aberration",
-            )
+    def test_aberration_works_with_single_color_palette(self):
+        image = render(
+            16,
+            8,
+            [(80, 140, 200)],
+            "single-color-aberration",
+            wave_edge="aberration",
+        )
+        self.assertEqual(image.size, (16, 8))
 
     def test_one_color_stop_renders_a_tonal_gradient(self):
         image = np.asarray(render(32, 16, [(100, 140, 180)], "one"))
@@ -318,28 +348,71 @@ class RenderTests(unittest.TestCase):
         self.assertGreater(float(vertical_mask[-1, :].max()), 0.9)
         self.assertGreater(float(vertical_mask[40, 20:-20].std()), 0.05)
 
-    def test_underglow_is_centered_on_wave_and_follows_its_end_fade(self):
-        horizontal_mask = np.zeros((40, 80), dtype=np.float32)
-        horizontal_mask[20:] = 1
+    def test_underglow_spreads_into_background_and_follows_end_fade(self):
+        horizontal_mask = np.zeros((80, 100), dtype=np.float32)
+        horizontal_mask[40:] = 1
         horizontal_glow = _create_wave_underglow_mask(
             horizontal_mask, "horizontal"
         )
-        np.testing.assert_array_equal(horizontal_glow[:, 0], horizontal_glow[:, -1])
-        self.assertAlmostEqual(
-            float(horizontal_glow[19, 40]),
-            float(horizontal_glow[20, 40]),
-            places=2,
+        self.assertGreater(float(horizontal_glow[39, 50]), 0.9)
+        self.assertGreater(
+            np.count_nonzero(horizontal_glow[:40, 50] > 0.05), 5
         )
-        self.assertGreater(float(horizontal_glow[20, 40]), 0.5)
+        self.assertFalse(np.any(horizontal_glow[40:]))
 
         fade = np.linspace(0, 1, horizontal_mask.shape[1], dtype=np.float32)
         faded_mask = horizontal_mask * fade[None, :]
         faded_glow = _create_wave_underglow_mask(faded_mask, "horizontal")
-        self.assertLess(float(faded_glow[:, 0].max()), float(faded_glow[:, 40].max()))
+        self.assertLess(float(faded_glow[:, 0].max()), float(faded_glow[:, 50].max()))
 
         vertical_mask = horizontal_mask.T
         vertical_glow = _create_wave_underglow_mask(vertical_mask, "vertical")
-        np.testing.assert_array_equal(vertical_glow[0], vertical_glow[-1])
+        self.assertGreater(float(vertical_glow[50, 39]), 0.9)
+        self.assertFalse(np.any(vertical_glow[:, 40:]))
+
+    def test_underglow_preserves_wave_gradient_palette(self):
+        from unittest.mock import patch
+
+        options = dict(
+            width=64,
+            height=40,
+            colors=[
+                (15, 20, 40),
+                (50, 100, 170),
+                (80, 180, 210),
+                (200, 70, 130),
+                (240, 190, 80),
+                (250, 245, 230),
+            ],
+            seed="same-wave-under-edge-treatments",
+            wave_ends="edge-to-edge",
+            wave_orientation="horizontal",
+            dither=0,
+            halftone_strength=0,
+            grain_strength=0,
+        )
+        point_clouds = {}
+        for edge in ("shadow", "underglow"):
+            outputs = []
+
+            def record_point_cloud(*args, **kwargs):
+                result = _create_point_cloud(*args, **kwargs)
+                outputs.append(result.copy())
+                return result
+
+            with patch(
+                "gradient_wallpaper.render._create_point_cloud",
+                side_effect=record_point_cloud,
+            ):
+                render(**options, wave_edge=edge)
+            point_clouds[edge] = outputs
+
+        self.assertEqual(len(point_clouds["shadow"]), 2)
+        self.assertEqual(len(point_clouds["underglow"]), 2)
+        for shadow_cloud, glow_cloud in zip(
+            point_clouds["shadow"], point_clouds["underglow"]
+        ):
+            np.testing.assert_array_equal(shadow_cloud, glow_cloud)
 
     def test_vertical_wave_foreground_side_controls_highlight_side(self):
         left_mask, left_highlight, _ = _create_wave_layers(
@@ -370,7 +443,7 @@ class RenderTests(unittest.TestCase):
         self.assertGreater(int(np.argmax(left_highlight[row])), left_edge)
         self.assertLess(int(np.argmax(right_highlight[row])), right_edge)
 
-    def test_wave_depth_controls_raised_lighting(self):
+    def test_wave_edge_strength_controls_raised_lighting(self):
         image = np.full((8, 8, 3), 0.4, dtype=np.float32)
         highlight = np.zeros((8, 8), dtype=np.float32)
         shadow = np.zeros((8, 8), dtype=np.float32)
@@ -394,6 +467,18 @@ class RenderTests(unittest.TestCase):
         self.assertTrue(np.all(glowing[4, 4] > image[4, 4]))
         self.assertTrue(np.all(shadowed <= image))
 
+    def test_wave_shadow_strength_softens_at_medium_and_high_values(self):
+        image = np.full((1, 1, 3), 0.5, dtype=np.float32)
+        shadow = np.ones((1, 1), dtype=np.float32)
+        shadow_color = np.zeros(3, dtype=np.float32)
+
+        medium = _apply_wave_shadow(image, shadow, 0.5, shadow_color)
+        high = _apply_wave_shadow(image, shadow, 1, shadow_color)
+
+        np.testing.assert_allclose(medium[0, 0], 0.43625)
+        np.testing.assert_allclose(high[0, 0], 0.395)
+        self.assertTrue(np.all(high[0, 0] > 0.35))
+
     def test_wave_shadow_uses_darkest_palette_color(self):
         palette = np.asarray([(255, 0, 0), (0, 0, 80), (255, 255, 255)])
         expected = np.asarray(
@@ -408,7 +493,7 @@ class RenderTests(unittest.TestCase):
         )
         np.testing.assert_allclose(
             result[0, 0],
-            background[0, 0] * (1 - 0.3 * (1 - expected)),
+            background[0, 0] * (1 - 0.3 * 0.7 * (1 - expected)),
         )
 
     def test_palette_roles_use_brightness_and_color_separation(self):
@@ -434,7 +519,7 @@ class RenderTests(unittest.TestCase):
         self.assertIsNone(accent)
         np.testing.assert_array_equal(gradient, palette)
 
-    def test_chromatic_palette_reserves_two_brightest_colors(self):
+    def test_aberration_colors_use_average_palette_saturation_and_lightness(self):
         palette = np.asarray(
             [
                 (30, 30, 30),
@@ -445,42 +530,90 @@ class RenderTests(unittest.TestCase):
             ],
             dtype=np.float32,
         )
-        gradient, aberration = _extract_chromatic_colors(palette)
-        np.testing.assert_array_equal(gradient, palette[:3])
-        np.testing.assert_array_equal(aberration, palette[3:])
+        hls = [
+            colorsys.rgb_to_hls(*(color / 255))
+            for color in palette
+        ]
+        average_lightness = float(np.mean([color[1] for color in hls]))
+        average_saturation = float(np.mean([color[2] for color in hls]))
+        expected = np.asarray(
+            [
+                colorsys.hls_to_rgb(hue, average_lightness, average_saturation)
+                for hue in (0, 1 / 3, 2 / 3)
+            ],
+            dtype=np.float32,
+        ) * 255
+        np.testing.assert_allclose(_create_aberration_colors(palette), expected)
 
-        unchanged, no_aberration = _extract_chromatic_colors(palette[:3])
-        np.testing.assert_array_equal(unchanged, palette[:3])
-        self.assertIsNone(no_aberration)
-
-    def test_chromatic_aberration_is_seeded_and_stays_near_wave_edge(self):
+    def test_aberration_is_seeded_additive_and_orientation_aware(self):
         mask = np.zeros((24, 32), dtype=np.float32)
         mask[12:] = 1
         image = np.full((24, 32, 3), 0.3, dtype=np.float32)
-        colors = np.asarray([(255, 40, 20), (30, 220, 255)], dtype=np.float32)
+        colors = np.asarray(
+            [(255, 40, 40), (40, 255, 40), (40, 40, 255)], dtype=np.float32
+        )
 
-        first = _apply_chromatic_aberration(
-            image.copy(), mask, colors, 1, np.random.default_rng(42)
+        first = _apply_aberration(
+            image.copy(), mask, colors, 1, np.random.default_rng(42), "horizontal"
         )
-        repeat = _apply_chromatic_aberration(
-            image.copy(), mask, colors, 1, np.random.default_rng(42)
+        repeat = _apply_aberration(
+            image.copy(), mask, colors, 1, np.random.default_rng(42), "horizontal"
         )
-        other = _apply_chromatic_aberration(
-            image.copy(), mask, colors, 1, np.random.default_rng(43)
+        other = _apply_aberration(
+            image.copy(), mask, colors, 1, np.random.default_rng(43), "horizontal"
         )
         np.testing.assert_array_equal(first, repeat)
         self.assertGreater(float(np.abs(first - image).max()), 0)
         self.assertGreater(float(np.abs(first - other).max()), 0)
-        np.testing.assert_array_equal(first[:8], image[:8])
-        np.testing.assert_array_equal(first[17:], image[17:])
+        self.assertTrue(np.all(first >= image))
+        np.testing.assert_array_equal(first[:10], image[:10])
+        np.testing.assert_array_equal(first[14:], image[14:])
 
-    def test_glue_layer_is_seeded_subtle_and_skips_small_palettes(self):
+        vertical_mask = np.zeros_like(mask)
+        vertical_mask[:, 16:] = 1
+        vertical = _apply_aberration(
+            image.copy(), vertical_mask, colors, 1, np.random.default_rng(42), "vertical"
+        )
+        self.assertGreater(float(np.abs(vertical - image).max()), 0)
+        np.testing.assert_array_equal(vertical[:, :14], image[:, :14])
+        np.testing.assert_array_equal(vertical[:, 18:], image[:, 18:])
+
+    def test_aberration_separation_increases_with_edge_strength(self):
+        from unittest.mock import Mock
+
+        image = np.zeros((700, 700, 3), dtype=np.float32)
+        mask = np.zeros((700, 700), dtype=np.float32)
+        mask[350:] = 1
+        colors = np.asarray(
+            [(255, 40, 40), (40, 255, 40), (40, 40, 255)], dtype=np.float32
+        )
+
+        def fixed_rng():
+            rng = Mock()
+            rng.permutation.return_value = np.asarray((-1, 0, 1))
+            rng.integers.side_effect = lambda low, high: high - 1
+            rng.uniform.return_value = 0.15
+            return rng
+
+        low_strength = _apply_aberration(
+            image, mask, colors, 0.1, fixed_rng(), "horizontal"
+        )
+        high_strength = _apply_aberration(
+            image, mask, colors, 1, fixed_rng(), "horizontal"
+        )
+        low_rows = np.flatnonzero(np.any(low_strength > 0, axis=(1, 2)))
+        high_rows = np.flatnonzero(np.any(high_strength > 0, axis=(1, 2)))
+
+        self.assertLess(high_rows[0], low_rows[0])
+        self.assertGreater(high_rows[-1], low_rows[-1])
+
+    def test_glue_layer_mixes_palette_colors_and_supports_small_palettes(self):
         image = np.full((32, 48, 3), 0.35, dtype=np.float32)
         palette = np.asarray(
             [(20, 40, 80), (80, 120, 200), (220, 100, 80), (240, 220, 160)],
             dtype=np.float32,
         )
-        options = (2, 2, 0.08, 0.35)
+        options = (2, 0.8, 0.35)
         first = _apply_glue_layer(
             image.copy(), palette, np.random.default_rng(42), *options
         )
@@ -492,14 +625,12 @@ class RenderTests(unittest.TestCase):
         )
         np.testing.assert_array_equal(first, repeat)
         self.assertGreater(float(np.abs(first - image).max()), 0)
-        self.assertLessEqual(float(np.abs(first - image).max()), 0.08)
+        self.assertLessEqual(float(np.abs(first - image).max()), 0.2)
         self.assertGreater(float(np.abs(first - other).max()), 0)
-        np.testing.assert_array_equal(
-            _apply_glue_layer(
-                image.copy(), palette[:2], np.random.default_rng(42), *options
-            ),
-            image,
+        small_palette = _apply_glue_layer(
+            image.copy(), palette[:2], np.random.default_rng(42), *options
         )
+        self.assertGreater(float(np.abs(small_palette - image).max()), 0)
 
     def test_halftone_uses_seeded_dots_and_strength_zero_is_noop(self):
         image = np.full((64, 64, 3), 0.5, dtype=np.float32)
@@ -593,9 +724,9 @@ class RenderTests(unittest.TestCase):
                 "--height", "10",
                 "--colors", "#123456", "#abcdef",
                 "--color-order", "hue",
-                "--cloud-spread", "0.12",
-                "--wave-depth", "0.8",
-                "--wave-mode", "shadow",
+                "--cloud-spread", "0.5",
+                "--wave-edge-strength", "0.8",
+                "--wave-edge", "shadow",
                 "--wave-ends", "edge-to-edge",
                 "--wave-orientation", "vertical",
                 "--wave-side", "left",
@@ -627,7 +758,8 @@ class RenderTests(unittest.TestCase):
         complete_seed = encode_seed("inspect", dict(DEFAULT_SETTINGS))
         complete_output = evaluate(complete_seed)
         self.assertIn("Seed settings", complete_output)
-        self.assertIn("Wave mode", complete_output)
+        self.assertIn("Wave edge strength", complete_output)
+        self.assertIn("Wave edge", complete_output)
         halftone_line = next(
             line for line in complete_output.splitlines()
             if line.startswith("Halftone strength")
@@ -663,9 +795,9 @@ class RenderTests(unittest.TestCase):
                 "Color order",
                 "Wave amplitude",
                 "Wave frequency",
-                "Wave depth",
+                "Wave edge strength",
                 "Wave opacity",
-                "Wave mode",
+                "Wave edge",
                 "Wave ends",
                 "Wave orientation",
                 "Wave side",
@@ -677,7 +809,6 @@ class RenderTests(unittest.TestCase):
                 "Fine dither",
                 "Cloud spread",
                 "Glue points",
-                "Glue colors",
                 "Glue strength",
                 "Glue spread",
                 "Halftone strength",
@@ -723,7 +854,7 @@ class RenderTests(unittest.TestCase):
             self.assertTrue(0 <= settings["wave_amplitude"] <= 0.5)
             self.assertLessEqual(settings["wave_amplitude"], 0.18)
             self.assertTrue(0 <= settings["wave_frequency"] <= 4)
-            self.assertTrue(0 <= settings["wave_depth"] <= 1)
+            self.assertTrue(0 <= settings["wave_edge_strength"] <= 1)
             self.assertTrue(0.92 <= settings["wave_opacity"] <= 1)
             self.assertTrue(-15 <= settings["wave_rotation"] <= 15)
             self.assertTrue(0 <= settings["zoom"] <= 0.12)
@@ -731,15 +862,14 @@ class RenderTests(unittest.TestCase):
             self.assertTrue(-0.35 <= settings["offset_y"] <= 0.35)
             self.assertTrue(-360 <= settings["angle"] <= 360)
             self.assertTrue(0 <= settings["dither"] <= 1)
-            self.assertTrue(0.03 <= settings["cloud_spread"] <= 0.5)
+            self.assertTrue(0 <= settings["cloud_spread"] <= 1)
             self.assertIn(settings["glue_points"], (2, 3))
-            self.assertIn(settings["glue_colors"], (1, 2))
-            self.assertTrue(0 <= settings["glue_strength"] <= 0.12)
+            self.assertTrue(0 <= settings["glue_strength"] <= 0.48)
             self.assertTrue(0.2 <= settings["glue_spread"] <= 0.55)
             self.assertTrue(0 <= settings["halftone_strength"] <= 0.45)
             self.assertTrue(0 <= settings["grain_strength"] <= 0.25)
             self.assertIn(settings["color_order"], ("input", "hue"))
-            self.assertEqual(settings["wave_mode"], "auto")
+            self.assertEqual(settings["wave_edge"], "auto")
             self.assertEqual(settings["wave_ends"], "auto")
             self.assertEqual(settings["wave_orientation"], "auto")
             self.assertEqual(settings["wave_side"], "auto")
@@ -775,7 +905,7 @@ class RenderTests(unittest.TestCase):
                 "--width", "20",
                 "--height", "10",
                 "--colors", "#123456", "#789abc",
-                "--wave-mode", "shadow",
+                "--wave-edge", "aberration",
                 "--wave-ends", "edge-to-edge",
                 "--wave-orientation", "vertical",
                 "--wave-side", "left",
@@ -785,8 +915,7 @@ class RenderTests(unittest.TestCase):
                 "--offset-x", "0.5",
                 "--offset-y", "-0.25",
                 "--glue-points", "3",
-                "--glue-colors", "1",
-                "--glue-strength", "0.12",
+                "--glue-strength", "0.48",
                 "--glue-spread", "0.4",
                 "--halftone-strength", "0.6",
                 "--grain-strength", "0.3",
@@ -804,8 +933,7 @@ class RenderTests(unittest.TestCase):
             self.assertEqual(replay_seed, original_seed)
             _, original_settings = decode_seed(original_seed)
             self.assertEqual(original_settings["glue_points"], 3)
-            self.assertEqual(original_settings["glue_colors"], 1)
-            self.assertEqual(original_settings["glue_strength"], 0.12)
+            self.assertEqual(original_settings["glue_strength"], 0.48)
             self.assertEqual(original_settings["glue_spread"], 0.4)
             self.assertEqual(original_settings["halftone_strength"], 0.6)
             self.assertEqual(original_settings["grain_strength"], 0.3)
@@ -819,14 +947,14 @@ class RenderTests(unittest.TestCase):
                 "--seed", original_seed,
                 "--width", "30",
                 "--colors", "#AA0000", "#00BB00",
-                "--wave-depth", "0.4",
+                "--wave-edge-strength", "0.4",
                 "--output", str(root / "updated.png"),
             )
             entropy, updated_settings = decode_seed(updated_seed)
             self.assertEqual(entropy, "base-seed")
             self.assertEqual(updated_settings["width"], 30)
             self.assertEqual(updated_settings["height"], 10)
-            self.assertEqual(updated_settings["wave_depth"], 0.4)
+            self.assertEqual(updated_settings["wave_edge_strength"], 0.4)
             self.assertEqual(updated_settings["colors"], ["#AA0000", "#00BB00"])
 
             invoke(

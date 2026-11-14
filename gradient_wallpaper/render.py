@@ -148,10 +148,17 @@ def _create_wave_underglow_mask(
         return np.zeros_like(mask)
     edge /= peak
 
-    blur_radius = max(1.0, min(mask.shape) * 0.012)
+    fade_profile = edge.max(axis=normal_axis, keepdims=True)
+    fade_profile /= max(float(fade_profile.max()), 1e-6)
+    blur_radius = max(1.0, min(mask.shape) * 0.04)
     edge_image = Image.fromarray(np.uint8(edge * 255))
     blurred = edge_image.filter(ImageFilter.GaussianBlur(blur_radius))
-    return np.asarray(blurred, dtype=np.float32) / 255
+    glow = np.asarray(blurred, dtype=np.float32) / 255
+    glow *= (1 - mask) * fade_profile
+    glow_peak = float(glow.max())
+    if glow_peak <= 1e-6:
+        return np.zeros_like(mask)
+    return glow / glow_peak
 
 
 def parse_color(value: str) -> tuple[int, int, int]:
@@ -362,7 +369,8 @@ def _apply_wave_shadow(
     depth: float,
     shadow_color: np.ndarray,
 ) -> np.ndarray:
-    strength = (shadow * depth * 0.3)[..., None]
+    softened_depth = depth * (1 - 0.3 * depth)
+    strength = (shadow * softened_depth * 0.3)[..., None]
     return background * (1 - strength * (1 - shadow_color))
 
 
@@ -410,7 +418,11 @@ def _apply_aberration(
         return image
     edge /= peak
 
-    max_offset = max(1, min(8, round(min(image.shape[:2]) * 0.006)))
+    separation_scale = 1 + 0.35 * depth
+    max_offset = max(
+        1,
+        min(8, round(min(image.shape[:2]) * 0.006 * separation_scale)),
+    )
     directions = rng.permutation((-1, 0, 1))
     contribution = np.zeros_like(image)
     for color, direction in zip(colors, directions):
@@ -442,17 +454,17 @@ def _apply_glue_layer(
     colors: np.ndarray,
     rng: np.random.Generator,
     point_count: int,
-    color_count: int,
     strength: float,
     spread: float,
 ) -> np.ndarray:
     unique_colors = np.unique(colors, axis=0)
-    if len(unique_colors) < 3 or point_count == 0 or strength == 0:
+    if point_count == 0 or strength == 0:
         return image
 
-    color_count = min(color_count, len(unique_colors))
-    selected = rng.choice(len(unique_colors), size=color_count, replace=False)
-    linear_colors = _srgb_to_linear(unique_colors[selected])
+    linear_colors = _srgb_to_linear(unique_colors)
+    mixed_colors = rng.dirichlet(
+        np.ones(len(linear_colors), dtype=np.float32), size=point_count
+    ) @ linear_colors
     height, width = image.shape[:2]
     x = np.linspace(0, 1, width, dtype=np.float32)[None, :]
     y = np.linspace(0, 1, height, dtype=np.float32)[:, None]
@@ -467,9 +479,9 @@ def _apply_glue_layer(
             (y - center_y) / sigma_y
         ) ** 2
         alpha = (
-            np.exp(-0.5 * distance) * strength * rng.uniform(0.7, 1.0)
+            np.exp(-0.5 * distance) * strength * 0.25 * rng.uniform(0.7, 1.0)
         )[..., None]
-        color = linear_colors[point_index % color_count]
+        color = mixed_colors[point_index]
         result = result * (1 - alpha) + color * alpha
     return result
 
@@ -621,15 +633,14 @@ def render(
     wave_frequency: float = 1.0,
     angle: float = 20.0,
     dither: float = 0.5,
-    cloud_spread: float = 0.18,
-    wave_depth: float = 0.75,
+    cloud_spread: float = 0.32,
+    wave_edge_strength: float = 0.75,
     wave_edge: str = "auto",
     wave_ends: str = "auto",
     wave_orientation: str = "auto",
     wave_side: str = "auto",
     glue_points: int = 2,
-    glue_colors: int = 2,
-    glue_strength: float = 0.07,
+    glue_strength: float = 0.28,
     glue_spread: float = 0.35,
     halftone_strength: float = 0.25,
     grain_strength: float = 0.1,
@@ -656,18 +667,16 @@ def render(
         raise ValueError("offset y must be between -1 and 1")
     if not 0 <= dither <= 1:
         raise ValueError("dither must be between 0 and 1")
-    if not 0.03 <= cloud_spread <= 0.5:
-        raise ValueError("cloud spread must be between 0.03 and 0.5")
-    if not 0 <= wave_depth <= 1:
-        raise ValueError("wave depth must be between 0 and 1")
+    if not 0 <= cloud_spread <= 1:
+        raise ValueError("cloud spread must be between 0 and 1")
+    if not 0 <= wave_edge_strength <= 1:
+        raise ValueError("wave edge strength must be between 0 and 1")
     if not 0 <= wave_opacity <= 1:
         raise ValueError("wave opacity must be between 0 and 1")
     if not 0 <= glue_points <= 8:
         raise ValueError("glue point count must be between 0 and 8")
-    if glue_colors not in {1, 2}:
-        raise ValueError("glue color count must be 1 or 2")
-    if not 0 <= glue_strength <= 0.25:
-        raise ValueError("glue strength must be between 0 and 0.25")
+    if not 0 <= glue_strength <= 1:
+        raise ValueError("glue strength must be between 0 and 1")
     if not 0.1 <= glue_spread <= 0.8:
         raise ValueError("glue spread must be between 0.1 and 0.8")
     if not 0 <= halftone_strength <= 1:
@@ -712,10 +721,7 @@ def render(
         wave_rotation=wave_rotation,
     )
     underglow = _create_wave_underglow_mask(mask, selected_orientation)
-    if (
-        (edge != "underglow" or wave_opacity == 0)
-        and accent_color is not None
-    ):
+    if accent_color is not None:
         gradient_colors = np.concatenate(
             (gradient_colors, accent_color[None, :]), axis=0
         )
@@ -724,9 +730,10 @@ def render(
         if edge == "aberration" and wave_opacity > 0
         else None
     )
+    effective_cloud_spread = 0.03 + cloud_spread * 0.47
 
     background_gradient = _create_point_cloud(
-        canvas_width, canvas_height, gradient_colors, rng, cloud_spread, angle
+        canvas_width, canvas_height, gradient_colors, rng, effective_cloud_spread, angle
     )
     background = primary_linear + (background_gradient - primary_linear) * 0.7
     wave = _create_point_cloud(
@@ -734,22 +741,22 @@ def render(
         canvas_height,
         gradient_colors,
         rng,
-        cloud_spread,
+        effective_cloud_spread,
         angle + rng.uniform(55, 125),
     )
-    effective_wave_depth = wave_depth * wave_opacity
+    effective_wave_edge_strength = wave_edge_strength * wave_opacity
     if edge == "shadow" and wave_opacity > 0:
         background = _apply_wave_shadow(
             background,
             shadow,
-            effective_wave_depth,
+            effective_wave_edge_strength,
             _darkest_palette_color(palette),
         )
     elif edge == "underglow" and wave_opacity > 0:
         background = _apply_wave_underglow(
             background,
             underglow,
-            effective_wave_depth,
+            effective_wave_edge_strength,
             _srgb_to_linear(accent_color[None, :])[0],
         )
     image = _screen_blend(background, wave, mask * wave_opacity)
@@ -760,24 +767,21 @@ def render(
             image,
             mask,
             aberration_colors,
-            effective_wave_depth,
+            effective_wave_edge_strength,
             rng,
             selected_orientation,
         )
     elif edge in {"shadow", "underglow"} and wave_opacity > 0:
-        highlight_intensity = 0.5 if edge == "underglow" else 1.0
         image = _apply_wave_highlight(
             image,
             highlight,
-            effective_wave_depth,
-            intensity=highlight_intensity,
+            effective_wave_edge_strength,
         )
     image = _apply_glue_layer(
         image,
         palette,
         glue_rng,
         glue_points,
-        glue_colors,
         glue_strength,
         glue_spread,
     )

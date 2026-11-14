@@ -19,6 +19,9 @@ description: Python coding style, argument parsing, validation, and command beha
   `EVAL_SETTINGS`, and README/help as applicable.
 - Omitted values without a self-contained seed are generated deterministically
   from the seed entropy. Keep that behavior reproducible.
+- Numeric visual options accept `random` or `unset` to draw a fresh value per
+  invocation; the emitted self-contained seed records it for exact replay.
+  Width and height remain explicit pixel sizes.
 - Reuse existing color parsing, color ordering, bounded numeric validators,
   and seed-resolution helpers instead of duplicating them.
 - Do not add a dependency for functionality available in the standard library,

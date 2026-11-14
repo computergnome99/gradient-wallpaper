@@ -6,6 +6,7 @@ import random
 import secrets
 import sys
 from pathlib import Path
+from typing import Callable
 
 from .render import order_colors, parse_color, render, resolve_wave_options
 from .seed import SeedSettings, decode_seed, encode_seed
@@ -18,9 +19,9 @@ DEFAULT_SETTINGS: SeedSettings = {
     "color_order": "input",
     "wave_amplitude": 0.22,
     "wave_frequency": 1.0,
-    "wave_depth": 0.75,
+    "wave_edge_strength": 0.75,
     "wave_opacity": 1.0,
-    "wave_mode": "auto",
+    "wave_edge": "auto",
     "wave_ends": "auto",
     "wave_orientation": "auto",
     "wave_side": "auto",
@@ -30,14 +31,15 @@ DEFAULT_SETTINGS: SeedSettings = {
     "offset_y": 0.0,
     "angle": 20.0,
     "dither": 0.5,
-    "cloud_spread": 0.18,
+    "cloud_spread": 0.32,
     "glue_points": 2,
-    "glue_colors": 2,
-    "glue_strength": 0.07,
+    "glue_strength": 0.28,
     "glue_spread": 0.35,
     "halftone_strength": 0.25,
     "grain_strength": 0.1,
 }
+
+_RANDOM_SENTINEL = "random"
 
 
 def _default_settings() -> SeedSettings:
@@ -97,50 +99,66 @@ def _random_palette(rng: random.Random, minimum_count: int = 3) -> list[str]:
     return colors
 
 
+_NUMERIC_RANDOMIZERS = {
+    "wave_amplitude": lambda rng: 0.06 + 0.12 * rng.random() ** 0.75,
+    "wave_frequency": lambda rng: 1.5 + 2.5 * rng.random() ** 0.75,
+    "wave_edge_strength": lambda rng: rng.uniform(0, 1),
+    "angle": lambda rng: rng.uniform(-360, 360),
+    "dither": lambda rng: rng.uniform(0, 1),
+    "cloud_spread": lambda rng: (
+        (0.12 - 0.03) / (0.5 - 0.03)
+        + ((0.5 - 0.12) / (0.5 - 0.03)) * rng.random() ** 0.75
+    ),
+    "glue_points": lambda rng: rng.randint(2, 3),
+    "glue_strength": lambda rng: 0.48 * rng.random() ** 2,
+    "glue_spread": lambda rng: rng.uniform(0.2, 0.55),
+    "halftone_strength": lambda rng: 0.45 * rng.random() ** 2,
+    "grain_strength": lambda rng: 0.25 * rng.random() ** 2,
+    "wave_rotation": lambda rng: rng.uniform(-15, 15),
+    "wave_opacity": lambda rng: 0.92 + 0.08 * rng.random() ** 0.25,
+    "zoom": lambda rng: 0.12 * rng.random() ** 3,
+    "offset_x": lambda rng: rng.uniform(-0.35, 0.35),
+    "offset_y": lambda rng: rng.uniform(-0.35, 0.35),
+}
+
+
+def _is_random_sentinel(value: object) -> bool:
+    return value == _RANDOM_SENTINEL
+
+
+def _is_missing_or_random(value: object) -> bool:
+    return value is None or _is_random_sentinel(value)
+
+
+def _randomize_selected_numeric_settings(
+    settings: SeedSettings, args: argparse.Namespace
+) -> None:
+    selected = [
+        setting
+        for setting in _NUMERIC_RANDOMIZERS
+        if _is_random_sentinel(getattr(args, setting))
+    ]
+    if not selected:
+        return
+
+    reroll_nonce = secrets.token_bytes(16)
+    for setting in selected:
+        keyed_nonce = reroll_nonce + b"\0" + setting.encode("utf-8")
+        rng = random.Random(int.from_bytes(keyed_nonce, "little"))
+        settings[setting] = _NUMERIC_RANDOMIZERS[setting](rng)
+
+
 def _randomize_missing_settings(
     settings: SeedSettings, entropy: str, args: argparse.Namespace
 ) -> None:
     rng = random.Random(int.from_bytes(entropy.encode("utf-8"), "little"))
     if args.colors is None:
-        settings["colors"] = _random_palette(
-            rng, minimum_count=5 if args.wave_mode == "chromatic-aberration" else 3
-        )
+        settings["colors"] = _random_palette(rng)
     if args.color_order is None:
         settings["color_order"] = rng.choice(("input", "hue"))
-    if args.wave_amplitude is None:
-        settings["wave_amplitude"] = 0.06 + 0.12 * rng.random() ** 0.75
-    if args.wave_frequency is None:
-        settings["wave_frequency"] = 1.5 + 2.5 * rng.random() ** 0.75
-    if args.wave_depth is None:
-        settings["wave_depth"] = rng.uniform(0, 1)
-    if args.angle is None:
-        settings["angle"] = rng.uniform(-360, 360)
-    if args.dither is None:
-        settings["dither"] = rng.uniform(0, 1)
-    if args.cloud_spread is None:
-        settings["cloud_spread"] = 0.12 + 0.38 * rng.random() ** 0.75
-    if args.glue_points is None:
-        settings["glue_points"] = rng.randint(2, 3)
-    if args.glue_colors is None:
-        settings["glue_colors"] = rng.randint(1, 2)
-    if args.glue_strength is None:
-        settings["glue_strength"] = 0.12 * rng.random() ** 2
-    if args.glue_spread is None:
-        settings["glue_spread"] = rng.uniform(0.2, 0.55)
-    if args.halftone_strength is None:
-        settings["halftone_strength"] = 0.45 * rng.random() ** 2
-    if args.grain_strength is None:
-        settings["grain_strength"] = 0.25 * rng.random() ** 2
-    if args.wave_rotation is None:
-        settings["wave_rotation"] = rng.uniform(-15, 15)
-    if args.wave_opacity is None:
-        settings["wave_opacity"] = 0.92 + 0.08 * rng.random() ** 0.25
-    if args.zoom is None:
-        settings["zoom"] = 0.12 * rng.random() ** 3
-    if args.offset_x is None:
-        settings["offset_x"] = rng.uniform(-0.35, 0.35)
-    if args.offset_y is None:
-        settings["offset_y"] = rng.uniform(-0.35, 0.35)
+    for setting, randomizer in _NUMERIC_RANDOMIZERS.items():
+        if _is_missing_or_random(getattr(args, setting)):
+            settings[setting] = randomizer(rng)
 
 
 def positive_integer(value: str) -> int:
@@ -161,6 +179,17 @@ def non_negative_integer(value: str) -> int:
     if number < 0:
         raise argparse.ArgumentTypeError("must be zero or greater")
     return number
+
+
+def _randomizable(
+    parser_function: Callable[[str], float | int],
+) -> Callable[[str], float | int | str]:
+    def parse(value: str) -> float | int | str:
+        if value.lower() in {"random", "unset"}:
+            return _RANDOM_SENTINEL
+        return parser_function(value)
+
+    return parse
 
 
 def bounded_float(minimum: float, maximum: float):
@@ -191,7 +220,10 @@ def _add_create_arguments(parser: argparse.ArgumentParser) -> None:
         "not stored in the seed. Randomization note: without a self-contained "
         "seed, omitted visual settings and colors are randomized from the seed; "
         "dimensions stay 1920x1080 unless specified. The generated seed stores "
-        "those choices for replay. Legacy text/numeric seeds remain supported."
+        "those choices for replay. Legacy text/numeric seeds remain supported. "
+        "Pass 'random' (or 'unset') for a numeric visual setting to reroll only "
+        "that setting; rerolls are fresh each invocation and saved in the "
+        "printed self-contained seed."
     )
     output_group = parser.add_argument_group("Output image")
     output_group.add_argument(
@@ -230,24 +262,24 @@ def _add_create_arguments(parser: argparse.ArgumentParser) -> None:
 
     wave_group = parser.add_argument_group("Wave")
     wave_group.add_argument(
-        "--wave-amplitude", type=bounded_float(0, 0.5),
-        help="base wave amplitude, from 0 to 0.5",
+        "--wave-amplitude", type=_randomizable(bounded_float(0, 0.5)),
+        help="base wave amplitude, from 0 to 0.5, or 'random'",
     )
     wave_group.add_argument(
-        "--wave-frequency", type=bounded_float(0, 20),
-        help="base path detail, from 0 to 20",
+        "--wave-frequency", type=_randomizable(bounded_float(0, 20)),
+        help="base path detail, from 0 to 20, or 'random'",
     )
     wave_group.add_argument(
-        "--wave-depth", type=bounded_float(0, 1),
-        help="wave effect strength from 0 to 1",
+        "--wave-edge-strength", type=_randomizable(bounded_float(0, 1)),
+        help="edge-effect strength from 0 to 1, or 'random'",
     )
     wave_group.add_argument(
-        "--wave-opacity", type=bounded_float(0, 1),
-        help="wave visibility from 0 (off) to 1 (full)",
+        "--wave-opacity", type=_randomizable(bounded_float(0, 1)),
+        help="wave visibility from 0 (off) to 1 (full), or 'random'",
     )
     wave_group.add_argument(
-        "--wave-mode",
-        choices=("auto", "shadow", "underglow", "chromatic-aberration"),
+        "--wave-edge",
+        choices=("auto", "shadow", "underglow", "aberration"),
         help="wave treatment, or automatic selection",
     )
     wave_group.add_argument(
@@ -266,62 +298,58 @@ def _add_create_arguments(parser: argparse.ArgumentParser) -> None:
         help="vertical foreground side",
     )
     wave_group.add_argument(
-        "--wave-rotation", type=bounded_float(-15, 15),
-        help="tilt the wave by -15 to 15 degrees",
+        "--wave-rotation", type=_randomizable(bounded_float(-15, 15)),
+        help="tilt the wave by -15 to 15 degrees, or 'random'",
     )
 
     framing_group = parser.add_argument_group("Framing")
     framing_group.add_argument(
-        "--zoom", type=bounded_float(0, 1),
-        help="overscale then crop the canvas, from 0 (off) to 1 (2x)",
+        "--zoom", type=_randomizable(bounded_float(0, 1)),
+        help="overscale then crop from 0 (off) to 1 (2x), or 'random'",
     )
     framing_group.add_argument(
-        "--offset-x", type=bounded_float(-1, 1),
-        help="horizontal offset in the overscan area (-1 left, 1 right)",
+        "--offset-x", type=_randomizable(bounded_float(-1, 1)),
+        help="horizontal overscan offset (-1 left, 1 right), or 'random'",
     )
     framing_group.add_argument(
-        "--offset-y", type=bounded_float(-1, 1),
-        help="vertical offset in the overscan area (-1 top, 1 bottom)",
+        "--offset-y", type=_randomizable(bounded_float(-1, 1)),
+        help="vertical overscan offset (-1 top, 1 bottom), or 'random'",
     )
 
     gradient_group = parser.add_argument_group("Gradient and blending")
     gradient_group.add_argument(
-        "--angle", type=bounded_float(-360, 360),
-        help="gradient direction in degrees, from -360 to 360",
+        "--angle", type=_randomizable(bounded_float(-360, 360)),
+        help="gradient direction in degrees, from -360 to 360, or 'random'",
     )
     gradient_group.add_argument(
-        "--cloud-spread", type=bounded_float(0.03, 0.5),
-        help="Gaussian point size/spread, from 0.03 to 0.5",
+        "--cloud-spread", type=_randomizable(bounded_float(0, 1)),
+        help="normalized Gaussian point size/spread from 0 to 1, or 'random'",
     )
     gradient_group.add_argument(
-        "--glue-points", type=non_negative_integer,
-        help="number of faint blending points, from 0 to 8",
+        "--glue-points", type=_randomizable(non_negative_integer),
+        help="number of faint blending points, from 0 to 8, or 'random'",
     )
     gradient_group.add_argument(
-        "--glue-colors", type=int, choices=(1, 2),
-        help="number of palette colors used by the blending layer, 1 or 2",
+        "--glue-strength", type=_randomizable(bounded_float(0, 1)),
+        help="normalized blending-layer opacity from 0 to 1, or 'random'",
     )
     gradient_group.add_argument(
-        "--glue-strength", type=bounded_float(0, 0.25),
-        help="blending-layer opacity from 0 to 0.25",
-    )
-    gradient_group.add_argument(
-        "--glue-spread", type=bounded_float(0.1, 0.8),
-        help="blending-point size as a fraction of image dimensions",
+        "--glue-spread", type=_randomizable(bounded_float(0.1, 0.8)),
+        help="blending-point size as a fraction of image dimensions, or 'random'",
     )
 
     effects_group = parser.add_argument_group("Post-effects")
     effects_group.add_argument(
-        "--dither", type=bounded_float(0, 1),
-        help="dither strength from 0 (off) to 1",
+        "--dither", type=_randomizable(bounded_float(0, 1)),
+        help="dither strength from 0 (off) to 1, or 'random'",
     )
     effects_group.add_argument(
-        "--halftone-strength", type=bounded_float(0, 1),
-        help="ordered dot-dithering strength from 0 (off) to 1 (strong)",
+        "--halftone-strength", type=_randomizable(bounded_float(0, 1)),
+        help="ordered dot-dithering strength from 0 to 1, or 'random'",
     )
     effects_group.add_argument(
-        "--grain-strength", type=bounded_float(0, 1),
-        help="filmic grain strength from 0 (off) to 1 (strong)",
+        "--grain-strength", type=_randomizable(bounded_float(0, 1)),
+        help="filmic grain strength from 0 to 1, or 'random'",
     )
 
 
@@ -369,9 +397,9 @@ EVAL_SETTINGS = (
     ("Color order", "color_order"),
     ("Wave amplitude", "wave_amplitude"),
     ("Wave frequency", "wave_frequency"),
-    ("Wave depth", "wave_depth"),
+    ("Wave edge strength", "wave_edge_strength"),
     ("Wave opacity", "wave_opacity"),
-    ("Wave mode", "wave_mode"),
+    ("Wave edge", "wave_edge"),
     ("Wave ends", "wave_ends"),
     ("Wave orientation", "wave_orientation"),
     ("Wave side", "wave_side"),
@@ -383,7 +411,6 @@ EVAL_SETTINGS = (
     ("Fine dither", "dither"),
     ("Cloud spread", "cloud_spread"),
     ("Glue points", "glue_points"),
-    ("Glue colors", "glue_colors"),
     ("Glue strength", "glue_strength"),
     ("Glue spread", "glue_spread"),
     ("Halftone strength", "halftone_strength"),
@@ -427,14 +454,14 @@ def _evaluate_seed(seed: str, parser: argparse.ArgumentParser) -> None:
             settings["color_order"],
         )
         (
-            settings["wave_mode"],
+            settings["wave_edge"],
             settings["wave_ends"],
             settings["wave_orientation"],
             settings["wave_side"],
         ) = resolve_wave_options(
             colors,
             entropy,
-            settings["wave_mode"],
+            settings["wave_edge"],
             settings["wave_ends"],
             settings["wave_orientation"],
             settings["wave_side"],
@@ -470,6 +497,7 @@ def _create(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     else:
         entropy, stored_settings = decoded_seed
         settings = {**stored_settings, "colors": list(stored_settings["colors"])}
+    _randomize_selected_numeric_settings(settings, args)
 
     if args.width is not None:
         settings["width"] = args.width
@@ -488,9 +516,9 @@ def _create(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     for argument, setting in (
         ("wave_amplitude", "wave_amplitude"),
         ("wave_frequency", "wave_frequency"),
-        ("wave_depth", "wave_depth"),
+        ("wave_edge_strength", "wave_edge_strength"),
         ("wave_opacity", "wave_opacity"),
-        ("wave_mode", "wave_mode"),
+        ("wave_edge", "wave_edge"),
         ("wave_ends", "wave_ends"),
         ("wave_orientation", "wave_orientation"),
         ("wave_side", "wave_side"),
@@ -502,14 +530,13 @@ def _create(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
         ("dither", "dither"),
         ("cloud_spread", "cloud_spread"),
         ("glue_points", "glue_points"),
-        ("glue_colors", "glue_colors"),
         ("glue_strength", "glue_strength"),
         ("glue_spread", "glue_spread"),
         ("halftone_strength", "halftone_strength"),
         ("grain_strength", "grain_strength"),
     ):
         value = getattr(args, argument)
-        if value is not None:
+        if value is not None and not _is_random_sentinel(value):
             settings[setting] = value
 
     try:
@@ -531,21 +558,21 @@ def _create(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
         settings["offset_y"] = bounded_float(-1, 1)(
             str(settings["offset_y"])
         )
-        settings["wave_depth"] = bounded_float(0, 1)(
-            str(settings["wave_depth"])
+        settings["wave_edge_strength"] = bounded_float(0, 1)(
+            str(settings["wave_edge_strength"])
         )
         settings["wave_opacity"] = bounded_float(0, 1)(
             str(settings["wave_opacity"])
         )
         settings["angle"] = bounded_float(-360, 360)(str(settings["angle"]))
         settings["dither"] = bounded_float(0, 1)(str(settings["dither"]))
-        settings["cloud_spread"] = bounded_float(0.03, 0.5)(
+        settings["cloud_spread"] = bounded_float(0, 1)(
             str(settings["cloud_spread"])
         )
         settings["glue_points"] = non_negative_integer(
             str(settings["glue_points"])
         )
-        settings["glue_strength"] = bounded_float(0, 0.25)(
+        settings["glue_strength"] = bounded_float(0, 1)(
             str(settings["glue_strength"])
         )
         settings["glue_spread"] = bounded_float(0.1, 0.8)(
@@ -565,11 +592,10 @@ def _create(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
 
     valid_choices = {
         "color_order": {"input", "hue"},
-        "wave_mode": {"auto", "shadow", "underglow", "chromatic-aberration"},
+        "wave_edge": {"auto", "shadow", "underglow", "aberration"},
         "wave_ends": {"auto", "fade", "edge-to-edge"},
         "wave_orientation": {"auto", "horizontal", "vertical"},
         "wave_side": {"auto", "left", "right"},
-        "glue_colors": {1, 2},
     }
     for key, choices in valid_choices.items():
         if settings[key] not in choices:
@@ -593,8 +619,8 @@ def _create(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
             angle=settings["angle"],
             dither=settings["dither"],
             cloud_spread=settings["cloud_spread"],
-            wave_depth=settings["wave_depth"],
-            wave_mode=settings["wave_mode"],
+            wave_edge_strength=settings["wave_edge_strength"],
+            wave_edge=settings["wave_edge"],
             wave_ends=settings["wave_ends"],
             wave_orientation=settings["wave_orientation"],
             wave_side=settings["wave_side"],
@@ -603,7 +629,6 @@ def _create(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
             offset_x=settings["offset_x"],
             offset_y=settings["offset_y"],
             glue_points=settings["glue_points"],
-            glue_colors=settings["glue_colors"],
             glue_strength=settings["glue_strength"],
             glue_spread=settings["glue_spread"],
             halftone_strength=settings["halftone_strength"],

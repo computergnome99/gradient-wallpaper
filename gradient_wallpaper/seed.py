@@ -5,8 +5,8 @@ import binascii
 import json
 from typing import TypedDict, cast
 
-_SEED_VERSION = 6
-_PREVIOUS_SEED_VERSIONS = {3, 4, 5}
+_SEED_VERSION = 8
+_PREVIOUS_SEED_VERSIONS = {3, 4, 5, 6, 7}
 
 
 class SeedSettings(TypedDict):
@@ -16,9 +16,9 @@ class SeedSettings(TypedDict):
     color_order: str
     wave_amplitude: float
     wave_frequency: float
-    wave_depth: float
+    wave_edge_strength: float
     wave_opacity: float
-    wave_mode: str
+    wave_edge: str
     wave_ends: str
     wave_orientation: str
     wave_side: str
@@ -30,7 +30,6 @@ class SeedSettings(TypedDict):
     dither: float
     cloud_spread: float
     glue_points: int
-    glue_colors: int
     glue_strength: float
     glue_spread: float
     halftone_strength: float
@@ -38,8 +37,14 @@ class SeedSettings(TypedDict):
 
 
 _SETTING_KEYS = frozenset(SeedSettings.__annotations__)
+_VERSION_7_SETTING_KEYS = (
+    (_SETTING_KEYS - {"wave_edge_strength"}) | {"wave_depth"}
+)
+_VERSION_6_SETTING_KEYS = (
+    (_VERSION_7_SETTING_KEYS - {"wave_edge"}) | {"wave_mode", "glue_colors"}
+)
 _LEGACY_CROP_SETTING_KEYS = (
-    _SETTING_KEYS - {"offset_x", "offset_y"}
+    _VERSION_6_SETTING_KEYS - {"offset_x", "offset_y"}
 ) | {"crop_x", "crop_y"}
 _VERSION_5_SETTING_KEYS = _LEGACY_CROP_SETTING_KEYS
 _VERSION_4_SETTING_KEYS = _VERSION_5_SETTING_KEYS - {"wave_opacity"}
@@ -88,6 +93,8 @@ def decode_seed(value: str) -> tuple[str, SeedSettings] | None:
         3: _VERSION_3_SETTING_KEYS,
         4: _VERSION_4_SETTING_KEYS,
         5: _VERSION_5_SETTING_KEYS,
+        6: _VERSION_6_SETTING_KEYS,
+        7: _VERSION_7_SETTING_KEYS,
         _SEED_VERSION: _SETTING_KEYS,
     }[version]
     if (
@@ -126,6 +133,30 @@ def decode_seed(value: str) -> tuple[str, SeedSettings] | None:
         }
     if version in {3, 4}:
         settings = {**settings, "wave_opacity": 1.0}
+    if version <= 6:
+        settings = {**settings}
+        old_wave_edge = settings.pop("wave_mode")
+        settings["wave_edge"] = (
+            "aberration"
+            if old_wave_edge == "chromatic-aberration"
+            else old_wave_edge
+        )
+        settings.pop("glue_colors")
+        old_cloud_spread = settings["cloud_spread"]
+        if (
+            isinstance(old_cloud_spread, (int, float))
+            and not isinstance(old_cloud_spread, bool)
+        ):
+            settings["cloud_spread"] = (old_cloud_spread - 0.03) / 0.47
+        old_glue_strength = settings["glue_strength"]
+        if (
+            isinstance(old_glue_strength, (int, float))
+            and not isinstance(old_glue_strength, bool)
+        ):
+            settings["glue_strength"] = old_glue_strength / 0.25
+    if version != _SEED_VERSION:
+        settings = {**settings}
+        settings["wave_edge_strength"] = settings.pop("wave_depth")
     if (
         not isinstance(settings["width"], int)
         or isinstance(settings["width"], bool)
@@ -137,7 +168,7 @@ def decode_seed(value: str) -> tuple[str, SeedSettings] | None:
             isinstance(settings[key], str)
             for key in (
                 "color_order",
-                "wave_mode",
+                "wave_edge",
                 "wave_ends",
                 "wave_orientation",
                 "wave_side",
@@ -153,7 +184,7 @@ def decode_seed(value: str) -> tuple[str, SeedSettings] | None:
                 "zoom",
                 "offset_x",
                 "offset_y",
-                "wave_depth",
+                "wave_edge_strength",
                 "wave_opacity",
                 "angle",
                 "dither",
@@ -166,8 +197,6 @@ def decode_seed(value: str) -> tuple[str, SeedSettings] | None:
         )
         or not isinstance(settings["glue_points"], int)
         or isinstance(settings["glue_points"], bool)
-        or not isinstance(settings["glue_colors"], int)
-        or isinstance(settings["glue_colors"], bool)
     ):
         raise ValueError("invalid settings in self-contained seed")
 
