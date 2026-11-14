@@ -5,8 +5,8 @@ import binascii
 import json
 from typing import TypedDict, cast
 
-_SEED_VERSION = 8
-_PREVIOUS_SEED_VERSIONS = {3, 4, 5, 6, 7}
+_SEED_VERSION = 11
+_PREVIOUS_SEED_VERSIONS = {3, 4, 5, 6, 7, 8, 9, 10}
 
 
 class SeedSettings(TypedDict):
@@ -40,6 +40,9 @@ _SETTING_KEYS = frozenset(SeedSettings.__annotations__)
 _VERSION_7_SETTING_KEYS = (
     (_SETTING_KEYS - {"wave_edge_strength"}) | {"wave_depth"}
 )
+_VERSION_8_SETTING_KEYS = _SETTING_KEYS
+_VERSION_9_SETTING_KEYS = _SETTING_KEYS
+_VERSION_10_SETTING_KEYS = _SETTING_KEYS
 _VERSION_6_SETTING_KEYS = (
     (_VERSION_7_SETTING_KEYS - {"wave_edge"}) | {"wave_mode", "glue_colors"}
 )
@@ -95,6 +98,9 @@ def decode_seed(value: str) -> tuple[str, SeedSettings] | None:
         5: _VERSION_5_SETTING_KEYS,
         6: _VERSION_6_SETTING_KEYS,
         7: _VERSION_7_SETTING_KEYS,
+        8: _VERSION_8_SETTING_KEYS,
+        9: _VERSION_9_SETTING_KEYS,
+        10: _VERSION_10_SETTING_KEYS,
         _SEED_VERSION: _SETTING_KEYS,
     }[version]
     if (
@@ -154,9 +160,30 @@ def decode_seed(value: str) -> tuple[str, SeedSettings] | None:
             and not isinstance(old_glue_strength, bool)
         ):
             settings["glue_strength"] = old_glue_strength / 0.25
-    if version != _SEED_VERSION:
+    if version <= 7:
         settings = {**settings}
         settings["wave_edge_strength"] = settings.pop("wave_depth")
+    if version <= 8:
+        settings = {**settings}
+        for key, scale in (("wave_amplitude", 0.5), ("wave_frequency", 20)):
+            value = settings[key]
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                settings[key] = value / scale
+        old_wave_side = settings["wave_side"]
+        if isinstance(old_wave_side, str) and old_wave_side in {"left", "right"}:
+            settings["wave_side"] = "start" if old_wave_side == "left" else "end"
+            if settings["wave_orientation"] == "auto":
+                settings["wave_orientation"] = "vertical"
+    if version <= 9:
+        settings = {**settings}
+        old_glue_spread = settings["glue_spread"]
+        if (
+            isinstance(old_glue_spread, (int, float))
+            and not isinstance(old_glue_spread, bool)
+        ):
+            settings["glue_spread"] = (old_glue_spread - 0.1) / 0.7
+    if version <= 10 and settings["wave_ends"] == "edge-to-edge":
+        settings = {**settings, "wave_ends": "full"}
     if (
         not isinstance(settings["width"], int)
         or isinstance(settings["width"], bool)

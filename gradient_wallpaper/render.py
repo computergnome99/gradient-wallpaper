@@ -49,6 +49,8 @@ def _create_wave_layers(
     wave_rotation: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Create a wave mask, a crest highlight, and an inner edge shadow."""
+    if wave_ends == "edge-to-edge":
+        wave_ends = "full"
     if orientation == "vertical":
         layers = _create_wave_layers(
             height,
@@ -64,7 +66,7 @@ def _create_wave_layers(
         return tuple(layer.T for layer in layers)
     if orientation != "horizontal":
         raise ValueError(f"unknown wave orientation {orientation!r}")
-    if wave_ends not in {"fade", "edge-to-edge"}:
+    if wave_ends not in {"fade", "full"}:
         raise ValueError(f"unknown wave ends style {wave_ends!r}")
     if foreground_side not in {"bottom", "top"}:
         raise ValueError(f"unknown horizontal foreground side {foreground_side!r}")
@@ -556,6 +558,20 @@ def _apply_halftone_dither(
     return image * (1 - strength) + quantized_srgb * strength
 
 
+def _apply_fine_dither(
+    image: np.ndarray,
+    strength: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    if strength == 0:
+        return image
+    noise_strength = strength * (1.25 + 2.25 * strength**2)
+    noise = rng.normal(
+        0, noise_strength / 255, size=(*image.shape[:2], 1)
+    ).astype(image.dtype, copy=False)
+    return image + noise
+
+
 def _apply_film_grain(
     image: np.ndarray,
     strength: float,
@@ -580,14 +596,14 @@ def resolve_wave_options(
     """Resolve seeded automatic wave options to their effective values."""
     if wave_edge not in {"auto", "shadow", "underglow", "aberration"}:
         raise ValueError(f"unknown wave edge {wave_edge!r}")
-    if wave_ends not in {"auto", "fade", "edge-to-edge"}:
+    if wave_ends == "edge-to-edge":
+        wave_ends = "full"
+    if wave_ends not in {"auto", "fade", "full"}:
         raise ValueError(f"unknown wave ends style {wave_ends!r}")
     if wave_orientation not in {"auto", "horizontal", "vertical"}:
         raise ValueError(f"unknown wave orientation {wave_orientation!r}")
-    if wave_side not in {"auto", "left", "right"}:
-        raise ValueError(f"unknown vertical wave side {wave_side!r}")
-    if wave_orientation == "horizontal" and wave_side != "auto":
-        raise ValueError("wave side left/right is only available for vertical waves")
+    if wave_side not in {"auto", "start", "end"}:
+        raise ValueError(f"unknown wave side {wave_side!r}")
 
     seed_value = int.from_bytes(seed.encode("utf-8"), "little", signed=False)
     mode_rng = np.random.default_rng(seed_value ^ 0xD1B54A32D192ED03)
@@ -600,23 +616,19 @@ def resolve_wave_options(
     selected_ends = (
         wave_ends
         if wave_ends != "auto"
-        else ("fade", "edge-to-edge")[int(ends_rng.integers(0, 2))]
+        else ("fade", "full")[int(ends_rng.integers(0, 2))]
     )
     selected_orientation = (
         wave_orientation
         if wave_orientation != "auto"
-        else (
-            "vertical"
-            if wave_side != "auto"
-            else ("horizontal", "vertical")[int(orientation_rng.integers(0, 2))]
-        )
+        else ("horizontal", "vertical")[int(orientation_rng.integers(0, 2))]
     )
     selected_side = (
         wave_side
         if wave_side != "auto"
-        else ("left", "right")[int(side_rng.integers(0, 2))]
+        else ("start", "end")[int(side_rng.integers(0, 2))]
         if selected_orientation == "vertical"
-        else "right"
+        else "end"
     )
     mode_options = ["shadow", "aberration"]
     if accent_color is not None:
@@ -739,10 +751,7 @@ def render(
         wave_frequency,
         orientation=selected_orientation,
         wave_ends=selected_ends,
-        foreground_side=(
-            "top" if selected_orientation == "vertical" and selected_side == "left"
-            else "bottom"
-        ),
+        foreground_side="top" if selected_side == "start" else "bottom",
         wave_rotation=wave_rotation,
     )
     underglow = _create_wave_underglow_mask(mask, selected_orientation)
@@ -829,10 +838,7 @@ def render(
         1.055 * np.maximum(image, 0) ** (1 / 2.4) - 0.055,
     )
 
-    if dither:
-        srgb += rng.normal(
-            0, dither * 1.25 / 255, size=(canvas_height, canvas_width, 1)
-        )
+    srgb = _apply_fine_dither(srgb, dither, rng)
     srgb = _apply_halftone_dither(srgb, halftone_strength, halftone_rng)
     srgb = _apply_film_grain(srgb, grain_strength, grain_rng)
     pixels = np.clip(srgb * 255, 0, 255).astype(np.uint8)

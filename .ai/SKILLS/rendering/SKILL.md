@@ -28,8 +28,9 @@ filters/resizing where already established.
    the edge; preserve the same wave gradient and highlight used by shadow mode.
 4. Apply the Gaussian glue layer when enabled. Each point uses a seeded
    linear-light mixture of all unique palette colors.
-5. Convert from linear light to sRGB; apply fine dither, ordered-dot halftone,
-   and monochrome film grain before quantizing to 8-bit pixels. For zoom above
+5. Convert from linear light to sRGB; apply fine dither (increasing more
+   strongly near its upper strength range), ordered-dot halftone, and
+   monochrome film grain before quantizing to 8-bit pixels. For zoom above
    0, render the full overscan canvas and crop to the requested output size
    without downscaling. Zoom is a 0–1 amount mapped to a 1–2x render scale.
 

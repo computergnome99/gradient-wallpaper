@@ -8,7 +8,13 @@ from gradient_wallpaper.seed import decode_seed, encode_seed
 
 def _settings_for_version(version):
     settings = dict(DEFAULT_SETTINGS)
-    settings["wave_depth"] = settings.pop("wave_edge_strength")
+    if version <= 7:
+        settings["wave_depth"] = settings.pop("wave_edge_strength")
+    if version <= 8:
+        settings["wave_amplitude"] *= 0.5
+        settings["wave_frequency"] *= 20
+    if version <= 9:
+        settings["glue_spread"] = 0.1 + settings["glue_spread"] * 0.7
     if version <= 6:
         settings["wave_mode"] = settings.pop("wave_edge")
         settings["glue_colors"] = 2
@@ -32,6 +38,7 @@ class SeedTests(unittest.TestCase):
         settings["glue_points"] = 3
         settings["glue_strength"] = 0.48
         settings["glue_spread"] = 0.4
+        settings["wave_ends"] = "full"
 
         token = encode_seed("entropy", settings)
 
@@ -39,7 +46,7 @@ class SeedTests(unittest.TestCase):
         self.assertEqual(decode_seed(token), ("entropy", settings))
         padding = "=" * (-len(token) % 4)
         payload = json.loads(base64.urlsafe_b64decode(token + padding))
-        self.assertEqual(payload["version"], 8)
+        self.assertEqual(payload["version"], 11)
 
     def test_version_three_seeds_get_neutral_crop_settings(self):
         settings = _settings_for_version(3)
@@ -166,6 +173,81 @@ class SeedTests(unittest.TestCase):
         self.assertEqual(upgraded_settings["cloud_spread"], DEFAULT_SETTINGS["cloud_spread"])
         self.assertEqual(upgraded_settings["glue_strength"], DEFAULT_SETTINGS["glue_strength"])
         self.assertNotIn("wave_depth", upgraded_settings)
+
+    def test_version_eight_seed_migrates_wave_controls_and_legacy_side(self):
+        for old_side, expected_side in (("left", "start"), ("right", "end")):
+            with self.subTest(old_side=old_side):
+                settings = _settings_for_version(8)
+                settings.update(
+                    wave_amplitude=0.31,
+                    wave_frequency=7.5,
+                    wave_orientation="auto",
+                    wave_side=old_side,
+                )
+                payload = {
+                    "version": 8,
+                    "entropy": "old-entropy",
+                    "settings": settings,
+                }
+                data = json.dumps(
+                    payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+                ).encode("utf-8")
+                token = base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+                decoded = decode_seed(token)
+
+                self.assertIsNotNone(decoded)
+                _, upgraded_settings = decoded
+                self.assertEqual(upgraded_settings["wave_amplitude"], 0.62)
+                self.assertEqual(upgraded_settings["wave_frequency"], 0.375)
+                self.assertEqual(upgraded_settings["wave_orientation"], "vertical")
+                self.assertEqual(upgraded_settings["wave_side"], expected_side)
+
+    def test_version_nine_seed_migrates_glue_spread(self):
+        for old_spread, expected_spread in (
+            (0.1, 0.0),
+            (0.35, (0.35 - 0.1) / 0.7),
+            (0.8, 1.0),
+        ):
+            with self.subTest(old_spread=old_spread):
+                settings = _settings_for_version(9)
+                settings["glue_spread"] = old_spread
+                payload = {
+                    "version": 9,
+                    "entropy": "old-entropy",
+                    "settings": settings,
+                }
+                data = json.dumps(
+                    payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+                ).encode("utf-8")
+                token = base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+                decoded = decode_seed(token)
+
+                self.assertIsNotNone(decoded)
+                _, upgraded_settings = decoded
+                self.assertAlmostEqual(
+                    upgraded_settings["glue_spread"], expected_spread
+                )
+
+    def test_version_ten_seed_migrates_legacy_wave_ends_value(self):
+        settings = _settings_for_version(10)
+        settings["wave_ends"] = "edge-to-edge"
+        payload = {
+            "version": 10,
+            "entropy": "old-entropy",
+            "settings": settings,
+        }
+        data = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode("utf-8")
+        token = base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+        decoded = decode_seed(token)
+
+        self.assertIsNotNone(decoded)
+        _, upgraded_settings = decoded
+        self.assertEqual(upgraded_settings["wave_ends"], "full")
 
     def test_plain_text_seed_is_entropy_not_a_self_contained_seed(self):
         self.assertIsNone(decode_seed("catppuccin"))

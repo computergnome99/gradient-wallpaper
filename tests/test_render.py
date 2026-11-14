@@ -14,6 +14,7 @@ from gradient_wallpaper.render import (
     _apply_glue_layer,
     _apply_halftone_dither,
     _apply_film_grain,
+    _apply_fine_dither,
     _create_wave_layers,
     _create_wave_underglow_mask,
     _classify_palette,
@@ -45,6 +46,8 @@ class RenderTests(unittest.TestCase):
         self.assertIn("--offset-x", help_text)
         self.assertIn("--offset-y", help_text)
         self.assertIn("--wave-edge", help_text)
+        self.assertIn("--dither-strength", help_text)
+        self.assertIn("--dither", help_text)
         self.assertIn("percentage progress bar on stderr", help_text)
         self.assertIn("rerolls are fresh each invocation", help_text)
         self.assertIn("aberration", help_text)
@@ -74,14 +77,14 @@ class RenderTests(unittest.TestCase):
             cloud_spreads.append(settings["cloud_spread"])
             opacities.append(settings["wave_opacity"])
 
-        self.assertGreater(float(np.mean(amplitudes)), 0.10)
-        self.assertLess(float(np.mean(amplitudes)), 0.14)
-        self.assertGreater(float(np.mean(frequencies)), 2.5)
-        self.assertLess(float(np.mean(frequencies)), 3.2)
-        self.assertGreaterEqual(min(amplitudes), 0.06)
-        self.assertLessEqual(max(amplitudes), 0.18)
-        self.assertGreaterEqual(min(frequencies), 1.5)
-        self.assertLessEqual(max(frequencies), 4.0)
+        self.assertGreater(float(np.mean(amplitudes)), 0.20)
+        self.assertLess(float(np.mean(amplitudes)), 0.28)
+        self.assertGreater(float(np.mean(frequencies)), 0.12)
+        self.assertLess(float(np.mean(frequencies)), 0.18)
+        self.assertGreaterEqual(min(amplitudes), 0.12)
+        self.assertLessEqual(max(amplitudes), 0.36)
+        self.assertGreaterEqual(min(frequencies), 0.075)
+        self.assertLessEqual(max(frequencies), 0.2)
         self.assertGreaterEqual(min(cloud_spreads), (0.12 - 0.03) / 0.47)
         self.assertGreater(float(np.mean(cloud_spreads)), 0.6)
         self.assertLessEqual(max(cloud_spreads), 1)
@@ -197,7 +200,7 @@ class RenderTests(unittest.TestCase):
                     wave_amplitude=0,
                     wave_frequency=0,
                     orientation=orientation,
-                    wave_ends="edge-to-edge",
+                    wave_ends="full",
                 )
                 unrotated, _, _ = _create_wave_layers(
                     **options, rng=np.random.default_rng(42)
@@ -386,7 +389,7 @@ class RenderTests(unittest.TestCase):
             np.random.default_rng(42),
             0.22,
             1,
-            wave_ends="edge-to-edge",
+            wave_ends="full",
         )
         self.assertGreater(float(edge_mask[:, 0].max()), 0.9)
         self.assertGreater(float(edge_mask[:, -1].max()), 0.9)
@@ -398,12 +401,24 @@ class RenderTests(unittest.TestCase):
             0.22,
             1,
             orientation="vertical",
-            wave_ends="edge-to-edge",
+            wave_ends="full",
         )
         self.assertEqual(vertical_mask.shape, (80, 120))
         self.assertGreater(float(vertical_mask[0, :].max()), 0.9)
         self.assertGreater(float(vertical_mask[-1, :].max()), 0.9)
         self.assertGreater(float(vertical_mask[40, 20:-20].std()), 0.05)
+
+    def test_legacy_wave_ends_value_maps_to_full(self):
+        legacy = _create_wave_layers(
+            120, 80, np.random.default_rng(42), 0.22, 1,
+            wave_ends="edge-to-edge",
+        )
+        current = _create_wave_layers(
+            120, 80, np.random.default_rng(42), 0.22, 1,
+            wave_ends="full",
+        )
+        for legacy_layer, current_layer in zip(legacy, current):
+            np.testing.assert_array_equal(legacy_layer, current_layer)
 
     def test_underglow_spreads_into_background_and_follows_end_fade(self):
         horizontal_mask = np.zeros((80, 100), dtype=np.float32)
@@ -442,7 +457,7 @@ class RenderTests(unittest.TestCase):
                 (250, 245, 230),
             ],
             seed="same-wave-under-edge-treatments",
-            wave_ends="edge-to-edge",
+            wave_ends="full",
             wave_orientation="horizontal",
             dither=0,
             halftone_strength=0,
@@ -479,7 +494,7 @@ class RenderTests(unittest.TestCase):
             0.22,
             1,
             orientation="vertical",
-            wave_ends="edge-to-edge",
+            wave_ends="full",
             foreground_side="top",
         )
         right_mask, right_highlight, _ = _create_wave_layers(
@@ -489,7 +504,7 @@ class RenderTests(unittest.TestCase):
             0.22,
             1,
             orientation="vertical",
-            wave_ends="edge-to-edge",
+            wave_ends="full",
             foreground_side="bottom",
         )
         row = 40
@@ -499,6 +514,35 @@ class RenderTests(unittest.TestCase):
         self.assertGreater(int(np.argmax(right_mask[row])), right_edge)
         self.assertGreater(int(np.argmax(left_highlight[row])), left_edge)
         self.assertLess(int(np.argmax(right_highlight[row])), right_edge)
+
+    def test_wave_side_is_orientation_independent(self):
+        from gradient_wallpaper.render import resolve_wave_options
+
+        colors = [(20, 40, 100), (100, 80, 190), (250, 140, 160)]
+        for orientation in ("horizontal", "vertical"):
+            for side in ("start", "end"):
+                with self.subTest(orientation=orientation, side=side):
+                    _, _, selected_orientation, selected_side = resolve_wave_options(
+                        colors,
+                        "wave-side-options",
+                        wave_orientation=orientation,
+                        wave_side=side,
+                    )
+                    self.assertEqual(selected_orientation, orientation)
+                    self.assertEqual(selected_side, side)
+
+        automatic_orientation = resolve_wave_options(
+            colors, "wave-side-options"
+        )[2]
+        for side in ("start", "end"):
+            self.assertEqual(
+                resolve_wave_options(
+                    colors,
+                    "wave-side-options",
+                    wave_side=side,
+                )[2],
+                automatic_orientation,
+            )
 
     def test_wave_edge_strength_controls_raised_lighting(self):
         image = np.full((8, 8, 3), 0.4, dtype=np.float32)
@@ -710,6 +754,18 @@ class RenderTests(unittest.TestCase):
         self.assertGreater(float(np.abs(first - other).max()), 0)
         self.assertGreater(np.unique(first[..., 0]).size, 1)
 
+    def test_fine_dither_gains_visibility_at_high_strength(self):
+        image = np.full((128, 128, 3), 0.5, dtype=np.float32)
+        unchanged = _apply_fine_dither(image, 0, np.random.default_rng(42))
+        medium = _apply_fine_dither(image, 0.5, np.random.default_rng(42))
+        strong = _apply_fine_dither(image, 1, np.random.default_rng(42))
+
+        np.testing.assert_array_equal(unchanged, image)
+        medium_noise = float((medium - image).std())
+        strong_noise = float((strong - image).std())
+        self.assertGreater(strong_noise, medium_noise * 3.5)
+        self.assertLess(strong_noise, 0.02)
+
     def test_film_grain_is_independent_seeded_and_strength_zero_is_noop(self):
         image = np.full((64, 64, 3), 0.5, dtype=np.float32)
         unchanged = _apply_film_grain(image, 0, np.random.default_rng(42))
@@ -784,9 +840,9 @@ class RenderTests(unittest.TestCase):
                 "--cloud-spread", "0.5",
                 "--wave-edge-strength", "0.8",
                 "--wave-edge", "shadow",
-                "--wave-ends", "edge-to-edge",
+                "--wave-ends", "full",
                 "--wave-orientation", "vertical",
-                "--wave-side", "left",
+                "--wave-side", "start",
                 "--seed", "test",
                 "--output", str(output),
             ]
@@ -795,6 +851,34 @@ class RenderTests(unittest.TestCase):
             with Image.open(output) as image:
                 self.assertEqual(image.size, (20, 10))
                 self.assertEqual(image.format, "WEBP")
+
+    def test_cli_maps_normalized_controls_to_existing_render_values(self):
+        from gradient_wallpaper.cli import main
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "wallpaper.png"
+            for normalized, actual in ((0, 0.1), (0.5, 0.45), (1, 0.8)):
+                arguments = [
+                    "gradient-wallpaper",
+                    "--width", "20",
+                    "--height", "10",
+                    "--wave-amplitude", "0.44",
+                    "--wave-frequency", "0.05",
+                    "--glue-spread", str(normalized),
+                    "--output", str(output),
+                ]
+                with patch("sys.argv", arguments), patch(
+                    "gradient_wallpaper.cli.render",
+                    return_value=Image.new("RGB", (20, 10)),
+                ) as render_mock:
+                    main()
+
+                self.assertEqual(render_mock.call_args.kwargs["wave_amplitude"], 0.22)
+                self.assertEqual(render_mock.call_args.kwargs["wave_frequency"], 1.0)
+                self.assertAlmostEqual(
+                    render_mock.call_args.kwargs["glue_spread"], actual
+                )
 
     def test_eval_derives_seeded_settings_in_fixed_order(self):
         from contextlib import redirect_stdout
@@ -817,6 +901,12 @@ class RenderTests(unittest.TestCase):
         self.assertIn("Seed settings", complete_output)
         self.assertIn("Wave edge strength", complete_output)
         self.assertIn("Wave edge", complete_output)
+        side_line = next(
+            line for line in complete_output.splitlines()
+            if line.startswith("Wave side")
+        )
+        self.assertIn(side_line.split("|", 1)[1].strip(), ("start", "end"))
+        self.assertNotIn("n/a (horizontal)", complete_output)
         halftone_line = next(
             line for line in complete_output.splitlines()
             if line.startswith("Halftone strength")
@@ -863,7 +953,7 @@ class RenderTests(unittest.TestCase):
                 "Offset X",
                 "Offset Y",
                 "Gradient angle",
-                "Fine dither",
+                "Dither strength",
                 "Cloud spread",
                 "Glue points",
                 "Glue strength",
@@ -908,9 +998,9 @@ class RenderTests(unittest.TestCase):
             self.assertNotEqual(settings["colors"], [
                 "#173B70", "#7165C8", "#F28A9B", "#FFB36B"
             ])
-            self.assertTrue(0 <= settings["wave_amplitude"] <= 0.5)
-            self.assertLessEqual(settings["wave_amplitude"], 0.18)
-            self.assertTrue(0 <= settings["wave_frequency"] <= 4)
+            self.assertTrue(0 <= settings["wave_amplitude"] <= 1)
+            self.assertLessEqual(settings["wave_amplitude"], 0.36)
+            self.assertTrue(0 <= settings["wave_frequency"] <= 1)
             self.assertTrue(0 <= settings["wave_edge_strength"] <= 1)
             self.assertTrue(0.92 <= settings["wave_opacity"] <= 1)
             self.assertTrue(-15 <= settings["wave_rotation"] <= 15)
@@ -922,7 +1012,11 @@ class RenderTests(unittest.TestCase):
             self.assertTrue(0 <= settings["cloud_spread"] <= 1)
             self.assertIn(settings["glue_points"], (2, 3))
             self.assertTrue(0 <= settings["glue_strength"] <= 0.48)
-            self.assertTrue(0.2 <= settings["glue_spread"] <= 0.55)
+            self.assertTrue(
+                (0.2 - 0.1) / 0.7
+                <= settings["glue_spread"]
+                <= (0.55 - 0.1) / 0.7
+            )
             self.assertTrue(0 <= settings["halftone_strength"] <= 0.45)
             self.assertTrue(0 <= settings["grain_strength"] <= 0.25)
             self.assertIn(settings["color_order"], ("input", "hue"))
@@ -963,9 +1057,9 @@ class RenderTests(unittest.TestCase):
                 "--height", "10",
                 "--colors", "#123456", "#789abc",
                 "--wave-edge", "aberration",
-                "--wave-ends", "edge-to-edge",
+                "--wave-ends", "full",
                 "--wave-orientation", "vertical",
-                "--wave-side", "left",
+                "--wave-side", "start",
                 "--wave-rotation", "8",
                 "--wave-opacity", "0.4",
                 "--zoom", "0.25",

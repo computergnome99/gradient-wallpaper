@@ -25,8 +25,8 @@ BASE_ARGS = (
     "#F0BE50",
     "#FAF5E6",
     "--color-order", "input",
-    "--wave-amplitude", "0.15",
-    "--wave-frequency", "2.2",
+    "--wave-amplitude", "0.3",
+    "--wave-frequency", "0.11",
     "--wave-edge-strength", "0.75",
     "--wave-opacity", "0.9",
     "--wave-edge", "shadow",
@@ -38,11 +38,11 @@ BASE_ARGS = (
     "--offset-x", "0",
     "--offset-y", "0",
     "--angle", "20",
-    "--dither", "0.2",
+    "--dither-strength", "0.2",
     "--cloud-spread", "0.45",
     "--glue-points", "2",
     "--glue-strength", "0.28",
-    "--glue-spread", "0.35",
+    "--glue-spread", "0.35714285714285715",
     "--halftone-strength", "0.25",
     "--grain-strength", "0.1",
 )
@@ -58,7 +58,7 @@ OVERRIDES = (
     ),
     ("color-order", ("--color-order", "hue"), {"color_order": "hue"}),
     ("wave-amplitude", ("--wave-amplitude", "0.32"), {"wave_amplitude": 0.32}),
-    ("wave-frequency", ("--wave-frequency", "3.5"), {"wave_frequency": 3.5}),
+    ("wave-frequency", ("--wave-frequency", "0.175"), {"wave_frequency": 0.175}),
     (
         "wave-edge-strength",
         ("--wave-edge-strength", "0.4"),
@@ -68,10 +68,11 @@ OVERRIDES = (
     ("wave-edge-auto", ("--wave-edge", "auto"), {"wave_edge": "auto"}),
     ("wave-edge-underglow", ("--wave-edge", "underglow"), {"wave_edge": "underglow"}),
     ("wave-edge-aberration", ("--wave-edge", "aberration"), {"wave_edge": "aberration"}),
+    ("wave-ends-full", ("--wave-ends", "full"), {"wave_ends": "full"}),
     (
-        "wave-ends-edge-to-edge",
+        "wave-ends-legacy-alias",
         ("--wave-ends", "edge-to-edge"),
-        {"wave_ends": "edge-to-edge"},
+        {"wave_ends": "full"},
     ),
     ("wave-ends-auto", ("--wave-ends", "auto"), {"wave_ends": "auto"}),
     (
@@ -84,14 +85,15 @@ OVERRIDES = (
         ("--wave-orientation", "vertical"),
         {"wave_orientation": "vertical"},
     ),
-    ("wave-side-left", ("--wave-side", "left"), {"wave_side": "left"}),
-    ("wave-side-right", ("--wave-side", "right"), {"wave_side": "right"}),
+    ("wave-side-start", ("--wave-side", "start"), {"wave_side": "start"}),
+    ("wave-side-end", ("--wave-side", "end"), {"wave_side": "end"}),
     ("wave-rotation", ("--wave-rotation", "-8"), {"wave_rotation": -8}),
     ("zoom", ("--zoom", "0.6"), {"zoom": 0.6}),
     ("offset-x", ("--offset-x", "0.5"), {"offset_x": 0.5}),
     ("offset-y", ("--offset-y", "-0.5"), {"offset_y": -0.5}),
     ("angle", ("--angle", "100"), {"angle": 100}),
-    ("dither", ("--dither", "0.8"), {"dither": 0.8}),
+    ("dither-strength", ("--dither-strength", "0.8"), {"dither": 0.8}),
+    ("dither-legacy-alias", ("--dither", "0.6"), {"dither": 0.6}),
     ("cloud-spread", ("--cloud-spread", "0.85"), {"cloud_spread": 0.85}),
     ("glue-points", ("--glue-points", "4"), {"glue_points": 4}),
     ("glue-strength", ("--glue-strength", "0.8"), {"glue_strength": 0.8}),
@@ -215,8 +217,8 @@ class CliEndToEndTests(unittest.TestCase):
         decoded = decode_seed(seed)
         self.assertIsNotNone(decoded)
         _, settings = decoded
-        self.assertGreaterEqual(settings["wave_amplitude"], 0.06)
-        self.assertLessEqual(settings["wave_amplitude"], 0.18)
+        self.assertGreaterEqual(settings["wave_amplitude"], 0.12)
+        self.assertLessEqual(settings["wave_amplitude"], 0.36)
         self.assertNotEqual(
             settings["wave_amplitude"], self.base_settings["wave_amplitude"]
         )
@@ -236,6 +238,7 @@ class CliEndToEndTests(unittest.TestCase):
             "--wave-frequency", "random",
             "--angle", "unset",
             "--glue-points", "random",
+            "--glue-spread", "random",
             "--seed", self.base_seed,
         )
         results = []
@@ -249,10 +252,12 @@ class CliEndToEndTests(unittest.TestCase):
             self.assertIsNotNone(decoded)
             _, settings = decoded
             decoded_settings.append(settings)
-            self.assertGreaterEqual(settings["wave_amplitude"], 0.06)
-            self.assertLessEqual(settings["wave_amplitude"], 0.18)
-            self.assertGreaterEqual(settings["wave_frequency"], 1.5)
-            self.assertLessEqual(settings["wave_frequency"], 4)
+            self.assertGreaterEqual(settings["wave_amplitude"], 0.12)
+            self.assertLessEqual(settings["wave_amplitude"], 0.36)
+            self.assertGreaterEqual(settings["wave_frequency"], 0.075)
+            self.assertLessEqual(settings["wave_frequency"], 0.2)
+            self.assertGreaterEqual(settings["glue_spread"], 1 / 7)
+            self.assertLessEqual(settings["glue_spread"], 9 / 14)
             self.assertGreaterEqual(settings["angle"], -360)
             self.assertLessEqual(settings["angle"], 360)
             self.assertIn(settings["glue_points"], (2, 3))
@@ -262,6 +267,7 @@ class CliEndToEndTests(unittest.TestCase):
                     "wave_frequency",
                     "angle",
                     "glue_points",
+                    "glue_spread",
                 }:
                     self.assertEqual(settings[key], value, f"unexpected change to {key}")
 
@@ -273,6 +279,10 @@ class CliEndToEndTests(unittest.TestCase):
         self.assertNotEqual(
             decoded_settings[0]["wave_frequency"],
             decoded_settings[1]["wave_frequency"],
+        )
+        self.assertNotEqual(
+            decoded_settings[0]["glue_spread"],
+            decoded_settings[1]["glue_spread"],
         )
 
     def test_eval_subcommand_reports_cli_seed_settings(self):

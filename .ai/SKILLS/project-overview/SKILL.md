@@ -46,6 +46,12 @@ desktop backgrounds. It is not a GUI application.
   0 (no zoom), or a 1x render scale.
 - Wave opacity is a seeded visibility control; zero disables wave lighting and
   overlays. Random wave opacity stays close to full visibility.
+- CLI wave amplitude and frequency use normalized `0`-`1` values, mapped to
+  the renderer's existing physical ranges. Wave side uses orientation-relative
+  `start`/`end` choices: top/bottom for horizontal waves and left/right for
+  vertical waves.
+- CLI glue spread is normalized from `0` to `1` and maps to the renderer's
+  existing `0.1`-`0.8` size range.
 - Random cloud spread has a 0.12 minimum to avoid isolated small color spots;
   explicit user settings retain the full supported spread range.
 - CLI options override stored values when used with a self-contained seed.
