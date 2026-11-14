@@ -1,4 +1,5 @@
 import colorsys
+import importlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,6 +27,8 @@ from gradient_wallpaper.render import (
     parse_color,
     render,
 )
+
+render_module = importlib.import_module("gradient_wallpaper.render")
 
 
 class RenderTests(unittest.TestCase):
@@ -182,8 +185,9 @@ class RenderTests(unittest.TestCase):
             dither=0,
         )
         for scale, expected_spread in ((0, 0.03), (1, 0.5)):
-            with self.subTest(scale=scale), patch(
-                "gradient_wallpaper.render._create_point_cloud",
+            with self.subTest(scale=scale), patch.object(
+                render_module,
+                "_create_point_cloud",
                 wraps=_create_point_cloud,
             ) as point_cloud:
                 render(**options, cloud_spread=scale)
@@ -306,20 +310,24 @@ class RenderTests(unittest.TestCase):
             (250, 245, 230),
         ]
         with (
-            patch(
-                "gradient_wallpaper.render._apply_wave_shadow",
+            patch.object(
+                render_module,
+                "_apply_wave_shadow",
                 wraps=_apply_wave_shadow,
             ) as shadow,
-            patch(
-                "gradient_wallpaper.render._apply_wave_underglow",
+            patch.object(
+                render_module,
+                "_apply_wave_underglow",
                 wraps=_apply_wave_underglow,
             ) as underglow,
-            patch(
-                "gradient_wallpaper.render._apply_wave_highlight",
+            patch.object(
+                render_module,
+                "_apply_wave_highlight",
                 wraps=_apply_wave_highlight,
             ) as highlight,
-            patch(
-                "gradient_wallpaper.render._apply_aberration",
+            patch.object(
+                render_module,
+                "_apply_aberration",
                 wraps=_apply_aberration,
             ) as aberration,
         ):
@@ -472,8 +480,9 @@ class RenderTests(unittest.TestCase):
                 outputs.append(result.copy())
                 return result
 
-            with patch(
-                "gradient_wallpaper.render._create_point_cloud",
+            with patch.object(
+                render_module,
+                "_create_point_cloud",
                 side_effect=record_point_cloud,
             ):
                 render(**options, wave_edge=edge)
@@ -809,8 +818,9 @@ class RenderTests(unittest.TestCase):
             else np.concatenate((gradient_colors, accent_color[None, :]), axis=0)
         )
         generated = np.full((8, 16, 3), 0.2, dtype=np.float32)
-        with patch(
-            "gradient_wallpaper.render._create_point_cloud",
+        with patch.object(
+            render_module,
+            "_create_point_cloud",
             return_value=generated,
         ) as create_point_cloud:
             render(16, 8, colors, "shared-palette")
