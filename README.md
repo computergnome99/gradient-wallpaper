@@ -83,7 +83,7 @@ gradient-wallpaper create \
 ```
 
 The seed which the `create` command returns is a much longer, fully
-self-contained seed. It includes all chosen settings and is fully portable.
+self-contained seed. It includes all chosen settings and is completely portable.
 
 Whether you use a text seed or a generated, self-contained seed, the output is
 fully deterministic based on that seed's value.
@@ -202,4 +202,4 @@ can have a huge impact on the feel of the final image.
 > [!NOTE]
 >
 > Full-sized versions of these examples are available in
-> [./examples/originals/].
+> [examples/originals](./examples/originals/).
