@@ -45,6 +45,8 @@ class RenderTests(unittest.TestCase):
         self.assertIn("--offset-x", help_text)
         self.assertIn("--offset-y", help_text)
         self.assertIn("--wave-edge", help_text)
+        self.assertIn("percentage progress bar on stderr", help_text)
+        self.assertIn("rerolls are fresh each invocation", help_text)
         self.assertIn("aberration", help_text)
         self.assertNotIn("--wave-mode", help_text)
         self.assertNotIn("--wave-depth", help_text)

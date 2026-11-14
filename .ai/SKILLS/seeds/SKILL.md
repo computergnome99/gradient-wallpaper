@@ -18,6 +18,9 @@ coordinated by `gradient_wallpaper/cli.py`.
 - A non-self-contained input is treated as entropy text. `create` derives
   omitted visual settings deterministically from it, then prints a
   self-contained seed that can replay the result.
+- Explicit numeric `random`/`unset` options are an exception to omitted-setting
+  determinism: they draw fresh values per invocation, and the emitted seed
+  stores those chosen values for exact replay.
 - When a self-contained seed is combined with explicit options, apply those
   options over the stored settings and emit a new self-contained seed.
 - Numeric visual CLI options accept `random`/`unset` to draw a fresh value on

@@ -258,7 +258,8 @@ def _add_create_arguments(parser: argparse.ArgumentParser) -> None:
         "those choices for replay. Legacy text/numeric seeds remain supported. "
         "Pass 'random' (or 'unset') for a numeric visual setting to reroll only "
         "that setting; rerolls are fresh each invocation and saved in the "
-        "printed self-contained seed."
+        "printed self-contained seed. Interactive terminals show a percentage "
+        "progress bar on stderr; redirected runs omit it."
     )
     output_group = parser.add_argument_group("Output image")
     output_group.add_argument(

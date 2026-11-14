@@ -20,8 +20,8 @@ desktop backgrounds. It is not a GUI application.
 - `gradient_wallpaper/cli.py`: `create` and `eval` commands, argument parsing,
   randomization of omitted settings, validation, output, and seed reporting.
 - `gradient_wallpaper/render.py`: palette classification, point-cloud
-  gradients, wave masks, lighting, glue layer, halftone, grain, and image
-  encoding.
+  gradients, wave masks, lighting, glue layer, halftone, grain, and optional
+  progress callbacks. The CLI handles output encoding.
 - `gradient_wallpaper/seed.py`: self-contained seed JSON serialization and
   validation.
 - `gradient_wallpaper/__main__.py`: supports `python -m gradient_wallpaper`.
@@ -39,14 +39,18 @@ desktop backgrounds. It is not a GUI application.
 - A self-contained seed stores colors and all render settings. Entropy-only
   text seeds deterministically generate omitted settings, which are included
   in the self-contained seed printed by `create`.
+- Explicit numeric `random`/`unset` values draw fresh values on each run;
+  the emitted self-contained seed records them for exact replay.
 - Wave rotation and overscan zoom/offset are randomized from seed entropy when
-  omitted, then stored for exact replay. The default random zoom stays close
-  to 1x.
+  omitted, then stored for exact replay. Normalized random zoom stays close to
+  0 (no zoom), or a 1x render scale.
 - Wave opacity is a seeded visibility control; zero disables wave lighting and
   overlays. Random wave opacity stays close to full visibility.
 - Random cloud spread has a 0.12 minimum to avoid isolated small color spots;
   explicit user settings retain the full supported spread range.
 - CLI options override stored values when used with a self-contained seed.
+- Interactive CLI runs display percentage progress on stderr; non-TTY runs
+  omit the progress bar.
 - Supported output formats are PNG, JPEG, and WebP.
 
 ## Working principles

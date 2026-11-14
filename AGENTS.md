@@ -16,16 +16,20 @@ and the skill files relevant to your task.
 
 Run these from the repository root. Python 3.10 or later is required.
 
-| Task                                                                | Command                                |
-| ------------------------------------------------------------------- | -------------------------------------- |
-| Install the project and runtime dependencies for source development | `python -m pip install -e .`           |
-| Show CLI help                                                       | `python -m gradient_wallpaper --help`  |
-| Run the test suite                                                  | `python -m unittest discover -s tests` |
-| Build a standalone executable                                       | `python build.py`                      |
+| Task                                                                | Command                                                   |
+| ------------------------------------------------------------------- | --------------------------------------------------------- |
+| Install the project and runtime dependencies for source development | `python -m pip install -e .`                              |
+| Show CLI help                                                       | `python -m gradient_wallpaper --help`                     |
+| Show create options                                                 | `python -m gradient_wallpaper create --help`              |
+| Run the test suite                                                  | `python -m unittest discover -s tests`                    |
+| Run CLI subprocess tests                                            | `python -m unittest discover -s tests -p test_cli_e2e.py` |
+| Build a standalone executable                                       | `python build.py`                                         |
 
 The build command creates or reuses `.venv`, installs the build dependencies,
 and writes the executable to `dist/`.
 
-Keep changes focused, preserve deterministic seed behavior, update the README
-for user-visible CLI or packaging changes, and run relevant tests before
-finishing.
+Keep changes focused and preserve exact replay from self-contained seeds.
+Numeric options passed as `random`/`unset` intentionally draw fresh values;
+their emitted seed stores those values for replay. Keep progress output on
+stderr and TTY-only. Update the README for user-visible CLI or packaging
+changes, and run relevant tests before finishing.

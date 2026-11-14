@@ -15,9 +15,10 @@ description: Local source execution, standalone builds, CI, and platform release
   entry point.
 - `build/`, `dist/`, `.venv/`, bytecode, and packaging metadata are ignored by
   Git.
-- CI tests the package with supported Python versions. The release workflow
-  builds native binaries on GitHub-hosted Windows, Linux x64/ARM64, and macOS
-  Intel/Apple Silicon runners when a `v*` tag is pushed.
+- The test workflow runs the suite on Python 3.10 and 3.12. The release workflow
+  tests on Python 3.12, then builds native binaries on GitHub-hosted Windows,
+  Linux x86_64/ARM64, and macOS Intel/Apple Silicon runners when a `v*` tag is
+  pushed.
 - Release assets are unsigned standalone executables. Do not imply that
   binaries are notarized or code-signed.
 - Keep release actions on maintained official `actions/*` versions. A release
