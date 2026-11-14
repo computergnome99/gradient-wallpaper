@@ -14,9 +14,3 @@ dist/
 .coverage
 .DS_Store
 Thumbs.db
-
-# Generated files
-*.png
-*.jpg
-*.jpeg
-*.webp

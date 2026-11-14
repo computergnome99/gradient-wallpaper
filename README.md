@@ -1,29 +1,30 @@
+![banner gradient](./examples/assets/banner.png)
+
 # Gradient Wallpaper
 
-A small CLI for generating procedural desktop backgrounds. It classifies the
-input palette into a primary background color, an optional wave accent, and
-gradient colors. It creates two independently seeded point-cloud gradients,
-then overlays one using a single blurred, end-faded grayscale wave mask. Point
-colors blend in linear light and the layers use a screen/additive blend,
-avoiding dark gaps between colors. Seeded dithering helps reduce visible color
-banding. Optional post-effects add ordered, clustered-dot halftone dithering
-and separate monochrome film grain. A final, faint layer of large Gaussian
-color points softly blends across the wave and background; it is enabled when
-the palette contains at least three unique colors.
+A small tool to quickly generate gradient backgrounds.
 
-## Install and run from source
+## Getting started
 
-Python 3.10 or later is required.
+The easiest way to use this project is to download the pre-built binary from the
+releases. Simply download and [run](#usage).
+
+If you'd rather run the code locally, clone the project and use the following
+commands. Python 3.10 or later is required.
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
+
+gradient-wallpaper create --help
 ```
 
-This installs the `gradient-wallpaper` command and its NumPy/Pillow
-dependencies in an isolated environment. From the project root, you can also
-run it without installing the console script:
+This installs the `gradient-wallpaper` command and its NumPy/Pillow dependencies
+in an isolated environment.
+
+You can also just run it using Python directly without using any install
+scripts.
 
 ```sh
 python -m gradient_wallpaper create --help
@@ -31,7 +32,7 @@ python -m gradient_wallpaper create --help
 
 ## Build a standalone executable
 
-Build a one-file executable with one command:
+If you want to compile the binary yourself, simply run the `build.py` script.
 
 ```sh
 python build.py
@@ -41,181 +42,164 @@ The script creates or reuses `.venv`, installs the build dependencies, and
 places the executable in `dist/` (`gradient-wallpaper.exe` on Windows). No
 environment activation or separate install/build steps are needed.
 
+![divider gradient](./examples/assets/divider.png)
+
 ## Usage
 
-```sh
-gradient-wallpaper create --colors "#173b70" "#7165c8" "#f28a9b" "#ffb36b" \
-  --seed sunset --output ~/Pictures/sunset.png
-```
-
-`create` is the default command, so the existing form without the word
-`create` remains supported.
-
-The default image is `1920x1080`; both dimensions can be set independently:
+The simplest way to use the tool is to run it without any arguments. This
+randomizes the visual settings and gives you a new image each time.
 
 ```sh
-gradient-wallpaper --width 3840 --height 2160 \
-  --colors "#071952" "#088395" "#35a29f" --seed 42
+gradient-wallpaper create
 ```
 
-When run in an interactive terminal, the CLI displays a percentage progress bar
-for rendering and saving. It writes to stderr, keeping the image path and seed
-on stdout clean; redirected/non-interactive runs do not show the bar.
+### Commands
 
-Provide any number of color stops (at least one). Colors accept `#RGB` and
-`#RRGGBB` notation. The least saturated color is the primary in mixed-brightness
-palettes; when most colors are bright or dark, the brightest or darkest color
-is used instead. The seeded renderer chooses between a subtractive,
-palette-colored shadow with directional highlight; an additive accent underglow
-behind the wave on the background side of its edge; and traditional additive
-RGB aberration fringes. The aberration colors use red, green, and blue hues with the palette's
-average HSL saturation and lightness, so they harmonize with the image without
-requiring or reserving extra palette colors. Their separation increases
-slightly with `--wave-edge-strength`. The accent is reserved for
-underglow and otherwise remains available to both point-cloud gradients, which
-use different point placements and orientations. `--color-order hue` sorts
-stops along the shortest arc through HSV hue, useful for palettes that cross the
-red hue boundary. With one stop, both layers use tonal variants of that color.
-Quote `#`-prefixed colors in shells where `#` starts a comment.
-
-When settings are provided, the CLI prints a self-contained seed containing
-the colors, render settings, and procedural entropy used for the image. Save
-that complete seed and pass it alone to reproduce the image:
+The tool has two commands: `create` makes an image, and `eval` shows the
+settings saved in a seed.
 
 ```sh
-gradient-wallpaper --seed '...' --output replay.png
+gradient-wallpaper create \
+  --colors "#173b70" "#7165c8" "#f28a9b" "#ffb36b" \
+  --output sunset.png
 ```
 
-Inspect the settings carried by a seed with `eval`:
+`create` prints a self-contained seed when it finishes; save that seed if you'd
+like to make the same image again, modify it with additional settings, or
+reverse-engineer it with `eval`.
 
 ```sh
-gradient-wallpaper eval --seed '...'
-gradient-wallpaper eval --seed sample-entropy
+gradient-wallpaper eval --seed 'paste-the-seed-printed-by-create'
 ```
 
-The report lists every setting in a fixed order. Self-contained seeds show
-their stored values, resolving automatic wave options to the seeded choices.
-Entropy-only seeds derive and show the same randomized settings that `create`
-will use; dimensions show their defaults. The derived choices are repeatable
-for the same seed.
-
-If options are combined with a self-contained seed, explicitly supplied
-settings override the stored values and a new seed is printed. Output path and
-file format are not stored in the seed. Legacy text/numeric seeds are still
-accepted as procedural entropy, randomize omitted visual settings from that
-entropy, and are returned as self-contained seeds. Self-contained seeds have
-no textual prefix; the CLI distinguishes them from entropy-only text seeds by
-their encoded payload. Version-3 through version-7 self-contained seeds remain
-readable. Older wave mode/depth names and cloud/glue scales are migrated to
-current settings.
-
-For any numeric visual setting, pass `random` (or `unset`) to reroll just that
-setting. Each invocation draws a fresh value, while preserving all other
-settings from a self-contained seed. The printed seed stores the selected value
-so that exact result can be replayed; rerunning the command with the original
-seed draws a new value. Dimensions remain explicit pixel sizes and do not
-accept the random sentinel.
-
-Without a self-contained seed, omitted visual settings are randomized and
-baked into the printed seed. Random wave amplitude and frequency avoid near-flat
-values: amplitude ranges from 0.06 to 0.18 and frequency from 1.5 to 4, both
-biased toward their upper ends. Effective random cloud spread stays between
-0.12 and 0.5 to avoid isolated small color spots; the CLI stores it on a
-normalized 0–1 scale. If colors are omitted, a random 3–6 color HSL palette is
-created; wave-edge treatment, orientation, end treatment, vertical foreground
-side, wave rotation, zoom/offset, and glue-layer settings are chosen from the
-seed, along with
-randomized halftone and grain strengths. Width and height remain `1920x1080`
-unless specified. Random wave opacity stays between 0.92 and 1 and is biased
-very heavily toward full opacity. Random rotation stays within ±15 degrees;
-random zoom stays between 0 and 0.12 and is biased close to 0 (no zoom).
-Optional controls:
-
-```text
---wave-amplitude 0.22  Base wave amplitude (varied by seed), from 0 to 0.5
---wave-frequency 1    Base path detail (varied by seed), from 0 to 20
---wave-edge-strength 0.75  Strength of all wave-edge treatments, from 0 to 1
---wave-opacity 1      Wave visibility, from 0 (off) to 1 (full)
---wave-edge auto      auto, shadow, underglow, or aberration
---wave-ends auto      auto, fade, or edge-to-edge
---wave-orientation auto  auto, horizontal, or vertical
---wave-side auto      auto, left, or right foreground side for vertical waves
---wave-rotation 8     Wave tilt in degrees, from -15 to 15
---zoom 0              Overscale then crop, from 0 (off) to 1 (2x)
---offset-x 0          Horizontal offset in the overscan area, -1 to 1
---offset-y 0          Vertical offset in the overscan area, -1 to 1
---angle 20            Background point-cloud gradient direction
---dither 0.5          Dithering strength, from 0 (off) to 1
---cloud-spread 0.32   Normalized Gaussian point spread, from 0 to 1
---glue-points 2       Number of faint blending points, from 0 to 8 (0 disables)
---glue-strength 0.28  Normalized glue-layer opacity, from 0 to 1
---glue-spread 0.35    Glue-point size as a fraction of image dimensions
---halftone-strength 0.25  Ordered dot dithering, from 0 (off) to 1
---grain-strength 0.1      Film grain, from 0 (off) to 1
---color-order hue     Sort colors by hue instead of preserving input order
---format png          png, jpeg, or webp (otherwise inferred from the extension)
-```
-
-For numeric visual options, the example values above may be replaced with
-`random` (or `unset`) to reroll that setting from a seed.
-
-Choose `--wave-edge` to force a treatment; `auto` (the default) selects one
-using a separate random stream derived from the seed. Forcing an edge treatment
-does not replace the seed, so the same seed and treatment remain reproducible. Underglow
-requires a suitable accent color; aberration works with any palette size. The
-cloud-spread control maps 0–1 to the renderer's 0.03–0.5 point-size range, and
-glue-strength maps 0–1 to its 0–0.25 opacity range. Glue points blend all
-provided palette colors together in linear light. Run
-`gradient-wallpaper create --help` for create options or
-`gradient-wallpaper eval --help` for seed evaluation usage.
-
-`--wave-ends` and `--wave-orientation` also accept `auto`, using separate
-seed-derived choices, or can be explicitly set. `edge-to-edge` keeps the wave
-at full strength where it meets the image boundaries; `fade` retains the
-softened ends. Vertical orientation runs the wave from top to bottom instead
-of left to right. Underglow adds a broad, one-sided accent glow behind the wave
-on the background side of the edge, while preserving the wave's gradient and
-highlight; the glow follows the wave's end fade. Vertical waves choose a
-seeded left/right foreground side; set
-`--wave-side left` or `--wave-side right` to force one (which also selects
-vertical orientation when `--wave-orientation` is `auto`).
-`--wave-opacity 0` disables the wave layer and all wave lighting/effects;
-intermediate values fade the whole wave treatment. If omitted, opacity is
-randomized very slightly and stays close to full visibility.
-`--wave-edge-strength` adjusts the intensity of shadow, underglow, highlights,
-and aberration independently of the overall wave opacity. Shadow darkening is
-compressed toward the high end to retain more image detail.
-`--wave-rotation` tilts the wave and its lighting together, for either
-orientation. `--zoom` ranges from `0` (no zoom) to `1` (2x zoom). It renders a
-larger canvas and crops it back to the requested dimensions without scaling the
-result down. The offset controls choose where the requested-size window sits
-within the overscan: `0` centers it, while `-1` and `1` select the left/right
-or top/bottom limit. Offsets have no visual effect when zoom is `0`.
-The glue layer uses large, low-opacity Gaussian points to soften the boundary
-between the two gradients without replacing either one. It is skipped for
-palettes with fewer than three unique colors. Use `--glue-points 0` to disable
-it, or adjust the number of points, palette colors, opacity, and spread. These
-controls are included in versioned seeds.
-`--halftone-strength` adds a clustered-dot screen that selects between nearby
-brightness bands at a density determined by the gradient, making transitions
-look more printed and less perfectly smooth. `--grain-strength` independently
-adds fine monochrome grain over the finished image. Both effects are seeded,
-can be disabled with `0`, and are included in self-contained seeds. The existing
-`--dither` option remains a finer, low-amplitude noise dither.
-
-PNG is the default output format. JPEG and WebP are supported by choosing a
-matching output extension or using `--format`.
-
-## GitHub releases
-
-The GitHub Actions release workflow runs the tests and builds standalone
-executables when a version tag such as `v0.1.0` is pushed. It publishes
-Linux x86_64/ARM64, Windows x86_64, and macOS Intel/Apple Silicon assets to a
-GitHub Release. These binaries are not code-signed or notarized, so Windows
-SmartScreen or macOS Gatekeeper may show a security warning.
-
-## Run tests
+An ordinary text seed can be used as the starting point for randomized settings.
+This can be a simple word or phrase.
 
 ```sh
-python -m unittest discover -s tests
+gradient-wallpaper create \
+  --seed sunset \
+  --colors "#173b70" "#7165c8" "#f28a9b" "#ffb36b" \
+  --output sunset-from-seed.png
 ```
+
+The seed which the `create` command returns is a much longer, fully
+self-contained seed. It includes all chosen settings and is fully portable.
+
+Whether you use a text seed or a generated, self-contained seed, the output is
+fully deterministic based on that seed's value.
+
+### `create` options
+
+Getting started can be intimidating with so many options. Each option is
+optional. The best way I've found is to start with just a few options or colors,
+then iterate. You can either rerun the same command with modifications, or use
+the output seed of the last run as the basis for the next, with your
+modifications only overriding specific settings.
+
+#### Output image
+
+| Option           | Example                            | What it does                                                                                                                                             |
+| ---------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-h`, `--help`   | `gradient-wallpaper create --help` | Shows the options and their value ranges.                                                                                                                |
+| `-o`, `--output` | `--output sunset.png`              | Chooses where the image is saved. Defaults to `wallpaper.png`.                                                                                           |
+| `--width`        | `--width 2560`                     | Sets the image width in pixels. Defaults to `1920`.                                                                                                      |
+| `--height`       | `--height 1080`                    | Sets the image height in pixels. Defaults to `1080`.                                                                                                     |
+| `--format`       | `--format webp`                    | Picks `png`, `jpeg`, or `webp`. If you leave it out but specify an output filename, the file extension decides of your desired output file will be used. |
+
+#### Palette and seed
+
+| Option          | Example                                  | What it does                                                                                                                  |
+| --------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--colors`      | `--colors "#173b70" "#f28a9b" "#ffb36b"` | Sets the gradient colors. Add as many stops as you like. If you leave this out, colors are picked from the seed or at random. |
+| `--color-order` | `--color-order hue`                      | Keeps your color order with `input`, or sorts the colors by hue with `hue`.                                                   |
+| `--seed`        | `--seed sunset`                          | Acts as the basis for all settings. Leave it out for a fully random design.                                                   |
+
+#### Wave
+
+| Option                 | Example                       | What it does                                                                                                                                                             |
+| ---------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--wave-amplitude`     | `--wave-amplitude 0.44`       | Controls how far the wave bends from a straight line. Range: `0`-`1`.                                                                                                    |
+| `--wave-frequency`     | `--wave-frequency 0.05`       | Controls how much detail the wave has. Range: `0`-`1`.                                                                                                                   |
+| `--wave-edge`          | `--wave-edge underglow`       | Use `shadow`, `underglow`, or `aberration` to select what decoration the edge of the wave should have. `auto` picks a treatment from the seed. [See Examples](#examples) |
+| `--wave-edge-strength` | `--wave-edge-strength 0.75`   | Turns the wave's edge strength up or down, making it more or less visible. Range: `0`-`1`.                                                                               |
+| `--wave-opacity`       | `--wave-opacity 0.9`          | Fades the wave and its lighting. Range: `0`-`1`; use `0` to disable the wave altogether.                                                                                 |
+| `--wave-ends`          | `--wave-ends full`            | Chooses `auto`, `fade`, or `full`. Use `fade` for soft ends or `full` to run the wave right to the image edges.                                                          |
+| `--wave-orientation`   | `--wave-orientation vertical` | Chooses `auto`, `horizontal`, or `vertical`. `auto` picks an orientation from the seed.                                                                                  |
+| `--wave-side`          | `--wave-side start`           | Chooses which side is in the image foreground. Not usually something you need to change. Can be `start` (top/left) or `end` (bottom/right), or `auto`.                   |
+| `--wave-rotation`      | `--wave-rotation -8`          | Tilts the wave without changing its orientation. Range: `-15`-`15` degrees.                                                                                              |
+
+#### Framing
+
+| Option       | Example           | What it does                                                                                                                                                                                                                                    |
+| ------------ | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--zoom`     | `--zoom 0.25`     | Zooms into the generated image. Maintains the output quality by generating a larger initial image to compensate for the crop. Most useful when paired with the offset settings. Range: `0`-`1` where `0` is no zoom and `1` is a full, 2x zoom. |
+| `--offset-x` | `--offset-x 0.5`  | Moves the cropped view left or right within the overscan area. Range: `-1`-`1`; only has an effect when zoom is above `0`.                                                                                                                      |
+| `--offset-y` | `--offset-y -0.5` | Moves the cropped view up or down within the overscan area. Range: `-1`-`1`; only has an effect when zoom is above `0`.                                                                                                                         |
+
+#### Gradient and blending
+
+| Option            | Example               | What it does                                                                                |
+| ----------------- | --------------------- | ------------------------------------------------------------------------------------------- |
+| `--angle`         | `--angle 45`          | Sets the direction of the background point-cloud gradient, in degrees. Range: `-360`-`360`. |
+| `--cloud-spread`  | `--cloud-spread 0.5`  | Changes the size and softness of the gradient's color points. Range: `0`-`1`.               |
+| `--glue-points`   | `--glue-points 2`     | Adds up to 8 faint, color-blending points. Use `0` to turn this layer off. Range: `0`-`8`.  |
+| `--glue-strength` | `--glue-strength 0.3` | Changes how visible the blending layer is. Range: `0`-`1`.                                  |
+| `--glue-spread`   | `--glue-spread 0.36`  | Changes the size of the blending points. Range: `0`-`1`.                                    |
+
+#### Finishing touches
+
+| Option                | Example                    | What it does                                                                                       |
+| --------------------- | -------------------------- | -------------------------------------------------------------------------------------------------- |
+| `--dither-strength`   | `--dither-strength 0.5`    | Adds fine noise to hide banding; more noticeable near `1`. Range: `0`-`1`; use `0` to turn it off. |
+| `--halftone-strength` | `--halftone-strength 0.25` | Adds a printed, clustered-dot look. Range: `0`-`1`; use `0` to turn it off.                        |
+| `--grain-strength`    | `--grain-strength 0.1`     | Adds fine film grain. Range: `0`-`1`; use `0` to turn it off.                                      |
+
+> [!NOTE]
+>
+> For all numeric options (besides `--width` and `--height`), you can use
+> `random` (or `unset`) instead of a number to pick a fresh value. This changes
+> only the selected setting.
+
+### `eval` options
+
+`eval` only needs a seed. It's a quick way to check what rules a seed will
+generate.
+
+| Option         | Example                          | What it does                                        |
+| -------------- | -------------------------------- | --------------------------------------------------- |
+| `-h`, `--help` | `gradient-wallpaper eval --help` | Shows the `eval` usage.                             |
+| `--seed`       | `--seed "sunset"`                | Shows the settings that a given seed will generate. |
+
+## Examples
+
+I generated the following to visually demonstrate some of the less obvious
+settings. These all have the values cranked (almost) to max to make the effect
+of the setting as obvious as possible.
+
+### Wave Edges
+
+The `--wave-edge` settings are some of my favorite. I specifically like the
+`aberration` mode.
+
+| Value        | Preview                                          |
+| ------------ | ------------------------------------------------ |
+| `aberration` | ![aberration example](./examples/aberration.png) |
+| `shadow`     | ![shadow example](./examples/shadow.png)         |
+| `underglow`  | ![underglow example](./examples/underglow.png)   |
+
+### Post Effects
+
+The post effect settings are used after creating the base image to add some
+visual interest. `--dither` specifically can be pretty subtle, but adding these
+can have a huge impact on the feel of the final image.
+
+| Effect       | Preview                                      |
+| ------------ | -------------------------------------------- |
+| `--dither`   | ![dither example](./examples/dither.png)     |
+| `--grain`    | ![grain example](./examples/grain.png)       |
+| `--halftone` | ![halftone example](./examples/halftone.png) |
+
+> [!NOTE]
+>
+> Full-sized versions of these examples are available in
+> [./examples/originals/].
