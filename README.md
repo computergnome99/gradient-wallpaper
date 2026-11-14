@@ -146,7 +146,9 @@ modifications only overriding specific settings.
 | `--glue-strength` | `--glue-strength 0.3` | Changes how visible the blending layer is. Range: `0`-`1`.                                  |
 | `--glue-spread`   | `--glue-spread 0.36`  | Changes the size of the blending points. Range: `0`-`1`.                                    |
 
-#### Finishing touches
+#### Post effects
+
+([See examples](#examples))
 
 | Option                | Example                    | What it does                                                                                       |
 | --------------------- | -------------------------- | -------------------------------------------------------------------------------------------------- |
