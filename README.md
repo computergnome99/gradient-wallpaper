@@ -116,17 +116,17 @@ modifications only overriding specific settings.
 
 #### Wave
 
-| Option                 | Example                       | What it does                                                                                                                                                             |
-| ---------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--wave-amplitude`     | `--wave-amplitude 0.44`       | Controls how far the wave bends from a straight line. Range: `0`-`1`.                                                                                                    |
-| `--wave-frequency`     | `--wave-frequency 0.05`       | Controls how much detail the wave has. Range: `0`-`1`.                                                                                                                   |
-| `--wave-edge`          | `--wave-edge underglow`       | Use `shadow`, `underglow`, or `aberration` to select what decoration the edge of the wave should have. `auto` picks a treatment from the seed. [See Examples](#examples) |
-| `--wave-edge-strength` | `--wave-edge-strength 0.75`   | Turns the wave's edge strength up or down, making it more or less visible. Range: `0`-`1`.                                                                               |
-| `--wave-opacity`       | `--wave-opacity 0.9`          | Fades the wave and its lighting. Range: `0`-`1`; use `0` to disable the wave altogether.                                                                                 |
-| `--wave-ends`          | `--wave-ends full`            | Chooses `auto`, `fade`, or `full`. Use `fade` for soft ends or `full` to run the wave right to the image edges.                                                          |
-| `--wave-orientation`   | `--wave-orientation vertical` | Chooses `auto`, `horizontal`, or `vertical`. `auto` picks an orientation from the seed.                                                                                  |
-| `--wave-side`          | `--wave-side start`           | Chooses which side is in the image foreground. Not usually something you need to change. Can be `start` (top/left) or `end` (bottom/right), or `auto`.                   |
-| `--wave-rotation`      | `--wave-rotation -8`          | Tilts the wave without changing its orientation. Range: `-15`-`15` degrees.                                                                                              |
+| Option                 | Example                       | What it does                                                                                                                                                              |
+| ---------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--wave-amplitude`     | `--wave-amplitude 0.44`       | Controls how far the wave bends from a straight line. Range: `0`-`1`.                                                                                                     |
+| `--wave-frequency`     | `--wave-frequency 0.05`       | Controls how much detail the wave has. Range: `0`-`1`.                                                                                                                    |
+| `--wave-edge`          | `--wave-edge underglow`       | Use `shadow`, `underglow`, or `aberration` to select what decoration the edge of the wave should have. `auto` picks a treatment from the seed. [See examples](#examples). |
+| `--wave-edge-strength` | `--wave-edge-strength 0.75`   | Turns the wave's edge strength up or down, making it more or less visible. Range: `0`-`1`.                                                                                |
+| `--wave-opacity`       | `--wave-opacity 0.9`          | Fades the wave and its lighting. Range: `0`-`1`; use `0` to disable the wave altogether.                                                                                  |
+| `--wave-ends`          | `--wave-ends full`            | Chooses `auto`, `fade`, or `full`. Use `fade` for soft ends or `full` to run the wave right to the image edges.                                                           |
+| `--wave-orientation`   | `--wave-orientation vertical` | Chooses `auto`, `horizontal`, or `vertical`. `auto` picks an orientation from the seed.                                                                                   |
+| `--wave-side`          | `--wave-side start`           | Chooses which side is in the image foreground. Not usually something you need to change. Can be `start` (top/left) or `end` (bottom/right), or `auto`.                    |
+| `--wave-rotation`      | `--wave-rotation -8`          | Tilts the wave without changing its orientation. Range: `-15`-`15` degrees.                                                                                               |
 
 #### Framing
 
@@ -148,7 +148,7 @@ modifications only overriding specific settings.
 
 #### Post effects
 
-([See examples](#examples))
+[See examples](#examples).
 
 | Option                | Example                    | What it does                                                                                       |
 | --------------------- | -------------------------- | -------------------------------------------------------------------------------------------------- |
